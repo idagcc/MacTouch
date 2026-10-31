@@ -14,6 +14,7 @@ let package = Package(
             .linkedFramework("AppKit"), .linkedFramework("IOKit"),
             .linkedFramework("ApplicationServices"), .linkedFramework("ServiceManagement")
         ]),
-        .testTarget(name: "MacTouchCoreTests", dependencies: ["MacTouchCore"])
+        .testTarget(name: "MacTouchCoreTests", dependencies: ["MacTouchCore"]),
+        .testTarget(name: "MacTouchAppTests", dependencies: ["MacTouchApp", "MacTouchCore"])
     ]
 )

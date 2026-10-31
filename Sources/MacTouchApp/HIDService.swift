@@ -1,10 +1,12 @@
 import Foundation
 import IOKit
 import IOKit.hid
+import CryptoKit
 import MacTouchCore
 
 struct TouchDevice: Identifiable {
     var id: String
+    let connectionID: UInt64
     let name: String
     let vendorID: Int
     let productID: Int
@@ -12,6 +14,9 @@ struct TouchDevice: Identifiable {
     let descriptor: Data
     var support: String
     var usable: Bool
+    var formatSupported = false
+    var supportsMultitouchMode = false
+    var fingerprint: ControllerFingerprint?
     var reports: Int = 0
     var currentContacts: Int = 0
     var peakContacts: Int = 0
@@ -25,7 +30,22 @@ struct TouchDevice: Identifiable {
 }
 
 /// Run-loop confined to the main thread. Only touchscreen application collections match.
-final class HIDService {
+protocol TouchInputService: AnyObject {
+    var onDevices: (([TouchDevice]) -> Void)? { get set }
+    var onFrame: ((String, TouchFrame) -> Void)? { get set }
+    var onFailure: ((String, String) -> Void)? { get set }
+    var onRemoved: ((String) -> Void)? { get set }
+    var onIdentityInvalidated: ((String) -> Void)? { get set }
+    var onStatus: ((String) -> Void)? { get set }
+    func start()
+    func stop()
+    func rescan()
+    func resetDecoder(for selectedID: String)
+    func currentDevices() -> [TouchDevice]
+    func requestMultitouchMode(for selectedID: String) -> String
+}
+
+final class HIDService: TouchInputService {
     var onDevices: (([TouchDevice]) -> Void)?
     var onFrame: ((String, TouchFrame) -> Void)?
     var onFailure: ((String, String) -> Void)?
@@ -100,7 +120,7 @@ final class HIDService {
     func currentDevices() -> [TouchDevice] { devices.values.sorted { $0.name < $1.name } }
 
     /// The standard Device Mode feature is also used by TouchMyMac's input layer.
-    /// Only invoked by the user's selected-device action; never writes vendor reports.
+    /// Used by explicit setup and remembered automatic recovery; never writes vendor reports.
     func requestMultitouchMode(for selectedID: String) -> String {
         guard let pair = devices.first(where: { $0.value.id == selectedID }),
               let device = handles[pair.key] else { return "Connect and select a touch controller first." }
@@ -112,13 +132,7 @@ final class HIDService {
             publish()
             return message
         }
-        let matching = [kIOHIDElementUsagePageKey: 0x0D, kIOHIDElementUsageKey: 0x52] as CFDictionary
-        let elements = IOHIDDeviceCopyMatchingElements(device, matching, IOOptionBits(kIOHIDOptionsTypeNone)) as? [IOHIDElement] ?? []
-        let candidates = elements.filter {
-            IOHIDElementGetType($0) == kIOHIDElementTypeFeature &&
-            IOHIDElementGetLogicalMin($0) <= 2 && IOHIDElementGetLogicalMax($0) >= 2 &&
-            IOHIDElementGetReportCount($0) == 1
-        }
+        let candidates = multitouchModeElements(device)
         guard candidates.count == 1, let element = candidates.first else {
             return finish("This interface does not advertise a single writable standard multitouch-mode setting. No change was made. Export diagnostics so its configuration interface can be checked.")
         }
@@ -155,7 +169,7 @@ final class HIDService {
         guard let decoder = decoders[id] else {
             return "\(prefix) This interface's report format is still unsupported. Export diagnostics to add a profile."
         }
-        // A user-requested mode change is an explicit fresh validation attempt.
+        // An explicit request or remembered recovery is a fresh validation attempt.
         // Restart a previously rejected stream without closing the device and
         // potentially resetting its mode. The next malformed report still latches.
         decoders[id]?.reset()
@@ -177,6 +191,16 @@ final class HIDService {
         return (result, IOHIDValueGetIntegerValue(storage.pointee.takeUnretainedValue()))
     }
 
+    private func multitouchModeElements(_ device: IOHIDDevice) -> [IOHIDElement] {
+        let matching = [kIOHIDElementUsagePageKey: 0x0D, kIOHIDElementUsageKey: 0x52] as CFDictionary
+        let elements = IOHIDDeviceCopyMatchingElements(device, matching, IOOptionBits(kIOHIDOptionsTypeNone)) as? [IOHIDElement] ?? []
+        return elements.filter {
+            IOHIDElementGetType($0) == kIOHIDElementTypeFeature &&
+            IOHIDElementGetLogicalMin($0) <= 2 && IOHIDElementGetLogicalMax($0) >= 2 &&
+            IOHIDElementGetReportCount($0) == 1
+        }
+    }
+
     private func registryID(_ device: IOHIDDevice) -> UInt64 {
         var id: UInt64 = 0
         IORegistryEntryGetRegistryEntryID(IOHIDDeviceGetService(device), &id)
@@ -192,8 +216,8 @@ final class HIDService {
         let vendor = number(kIOHIDVendorIDKey), product = number(kIOHIDProductIDKey)
         let location = number(kIOHIDLocationIDKey)
         // A composite monitor may expose multiple HID interfaces at one USB location.
-        // Use its interface number too; an unknown interface gets a session-only ID,
-        // which intentionally requires reselection after reconnect instead of merging streams.
+        // Use its interface number too. A session-only ID can be reconciled
+        // through a unique descriptor fingerprint by the reconnect policy.
         let interface = IORegistryEntrySearchCFProperty(
             IOHIDDeviceGetService(device), kIOServicePlane, "bInterfaceNumber" as CFString,
             kCFAllocatorDefault, IOOptionBits(kIORegistryIterateParents | kIORegistryIterateRecursively)
@@ -210,9 +234,14 @@ final class HIDService {
         }
         if ambiguousIdentities.contains(stableID) { stableID += ":session-\(id)" }
         let data = IOHIDDeviceGetProperty(device, kIOHIDReportDescriptorKey as CFString) as? Data ?? Data()
-        var entry = TouchDevice(id: stableID, name: string(kIOHIDProductKey).isEmpty ? "USB touchscreen" : string(kIOHIDProductKey),
+        var entry = TouchDevice(id: stableID, connectionID: id, name: string(kIOHIDProductKey).isEmpty ? "USB touchscreen" : string(kIOHIDProductKey),
                                 vendorID: vendor, productID: product, transport: string(kIOHIDTransportKey),
                                 descriptor: data, support: "Checking touch format", usable: false)
+        if !data.isEmpty {
+            entry.fingerprint = ControllerFingerprint(vendorID: vendor, productID: product,
+                interfaceNumber: interface?.intValue,
+                descriptorHash: SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined())
+        }
         do {
             let decoder = try HIDDescriptor(data: data)
             decoders[id] = HIDReportDecoder(descriptor: decoder)
@@ -220,6 +249,8 @@ final class HIDService {
             entry.framing = decoder.framing.rawValue
             entry.touchReportIDs = decoder.reportIDs
             entry.usable = true
+            entry.formatSupported = true
+            entry.supportsMultitouchMode = multitouchModeElements(device).count == 1
             if result != kIOReturnSuccess {
                 entry.usable = false
                 let denied = result == kIOReturnNotPermitted || result == kIOReturnNotPrivileged

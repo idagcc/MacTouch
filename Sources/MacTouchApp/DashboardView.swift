@@ -68,7 +68,7 @@ struct DashboardView: View {
                 Label("Lives in your menu bar", systemImage: "menubar.rectangle").font(.system(size: 11, weight: .medium))
                 Text("Close this window and touch stays connected.").font(.system(size: 11)).foregroundStyle(.secondary).lineSpacing(3)
             }.padding(14).background(panel, in: RoundedRectangle(cornerRadius: 12))
-            Text("DEVELOPMENT PREVIEW · \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.3")").font(.system(size: 9, weight: .medium, design: .monospaced)).foregroundStyle(.tertiary).padding(.top, 10)
+            Text("DEVELOPMENT PREVIEW · \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.4")").font(.system(size: 9, weight: .medium, design: .monospaced)).foregroundStyle(.tertiary).padding(.top, 10)
         }.padding(18).frame(width: 194).background(Color.black.opacity(0.15))
     }
 
@@ -117,7 +117,7 @@ struct DashboardView: View {
                         }
                         ForEach(model.displays) { display in Text(display.name).tag(display.id) }
                     }.labelsHidden().accessibilityLabel("Target touchscreen display")
-                    Text("Choose the physical screen you’re touching. This mapping is remembered for this USB port.")
+                    Text("Choose the physical screen you’re touching. This mapping is saved for your controller.")
                         .font(.system(size: 12)).foregroundStyle(.secondary).lineSpacing(3)
                 }.padding(20).frame(maxWidth: .infinity, alignment: .leading).background(panel, in: RoundedRectangle(cornerRadius: 16))
 
@@ -140,6 +140,9 @@ struct DashboardView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(model.headline).font(.system(size: 14, weight: .semibold))
+                    if model.automaticReconnect && !model.selectedDeviceID.isEmpty {
+                        Text(model.recoveryStatus).font(.system(size: 11)).foregroundStyle(accent)
+                    }
                     Text("Tap to click · move to drag · two fingers to scroll").font(.system(size: 11)).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -156,7 +159,13 @@ struct DashboardView: View {
     private var touchSettings: some View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 20) {
-                Label(model.selectedDevice?.name ?? "Choose a controller in Connection", systemImage: "hand.point.up.left").font(.headline)
+                Label(model.selectedDevice?.name ?? (model.selectedDeviceID.isEmpty ? "Choose a controller in Connection" : "Saved controller settings"), systemImage: "hand.point.up.left").font(.headline)
+                Toggle("Reconnect automatically", isOn: $model.automaticReconnect).toggleStyle(.switch)
+                Text("Remember this controller and restore its settings after an app restart, USB reconnect or wake. Once multitouch is confirmed, restore that mode in the background too. Keep Launch MacTouch at login enabled for kiosk startup.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text("Settings save automatically, even while the controller is unplugged.")
+                    .font(.system(size: 11)).foregroundStyle(accent)
+                Divider()
                 Picker("Touch rotation", selection: $model.configuration.rotation) {
                     Text("0°").tag(0); Text("90°").tag(90); Text("180°").tag(180); Text("270°").tag(270)
                 }.pickerStyle(.segmented)
@@ -174,7 +183,7 @@ struct DashboardView: View {
                     Text(String(format: "%.1f×", model.configuration.scrollSpeed)).monospacedDigit().frame(width: 40)
                 }
                 Text("Adding a second finger ends a drag. Lift both fingers before starting another click.").font(.system(size: 11)).foregroundStyle(.secondary)
-            }.disabled(model.selectedDevice == nil).padding(24).background(panel, in: RoundedRectangle(cornerRadius: 16))
+            }.disabled(model.selectedDeviceID.isEmpty).padding(24).background(panel, in: RoundedRectangle(cornerRadius: 16))
             VStack(alignment: .leading, spacing: 14) {
                 Toggle("Launch MacTouch at login", isOn: Binding(get: { model.loginEnabled }, set: model.setLogin)).toggleStyle(.switch)
                 Text(model.loginStatus).font(.system(size: 12)).foregroundStyle(.secondary)

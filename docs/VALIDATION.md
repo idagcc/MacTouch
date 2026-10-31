@@ -5,7 +5,7 @@ Checked 31 October 2026 on an Apple silicon Mac running macOS 27.0.1, using the 
 ## Completed
 
 - Native app compiles in debug and release configurations.
-- **69 XCTest cases pass:** 39 HID parsing/frame-assembly cases, 12 coordinate/gesture cases, 3 end-to-end serial-contact-to-pointer cases, 3 touch-test measurement cases and 12 map-pinch cases. The pinch cases cover opposite zoom directions, midpoint routing, scroll discrimination, serial-report grace, anchored fingers, jitter, liftoff, cancellation, ID replacement, third contacts, mapping/configuration changes, invalid time, jump rejection, scroll-speed isolation and old saved-profile decoding. Tests use synthetic standards-based fixtures, not captured ASUS reports.
+- **93 XCTest cases pass:** the previous 69 parsing/gesture/pinch cases, 17 durable-settings/reconnect-policy cases and 7 app-level recovery cases. The new coverage includes process-level store recreation, legacy profile migration, corrupted-file backup recovery, save failures, preserving settings across USB port changes, ambiguous-device rejection, retry backoff, actual AppModel startup/reconnect wiring, preserving enabled/paused intent during mode requests, and keeping `--diagnose` read-only. Controller and permission interfaces are stubbed in recovery integration tests; no physical USB device or pointer output is used by those tests.
 - Version 0.1.1 reproduces and fixes a standard serial-protocol bug: the second finger previously replaced the first in the decoded snapshot. The regression now verifies two contacts, scrolling, independent liftoff, reset and a subsequent click. A separate preview correction immediately publishes contact-ID changes even within a 33 ms UI update interval; this UI correction was reviewed in code.
 - Universal release executable builds for `arm64` and `x86_64`. The Mach-O minimum OS is 13.0 for both architectures.
 - App bundle is ad-hoc signed and its signature is verified. It is not Developer ID signed or notarized.
@@ -32,6 +32,13 @@ Checked 31 October 2026 on an Apple silicon Mac running macOS 27.0.1, using the 
 - The user enabled map pinch, left the tester, enabled pointer control, and confirmed that spreading and bringing fingers together zoomed their **actual embedded Google Map in Safari in both directions**. The app was observed in Connection with both permissions allowed, touch enabled, and a physical peak of five contacts. This is user-assisted end-to-end evidence on the connected controller, rather than a claim derived from synthetic tests.
 - A closed tester window was reopened; the app process remained running and no MacTouch crash report was found. One interrupted attempt coincided with the USB device disappearing from macOS. Reconnecting and requesting mode 2 restored reception.
 - General scrolling, other applications, native magnification, long-duration behavior and automatic mode restoration remain outside this validation.
+
+## Local 0.1.4 settings and kiosk recovery validation
+
+- Inspected the actual saved 0.1.3 preferences: the selected controller/display, Enable touch and map-pinch option were present. Restarting that build retained those local options, so a general local preference-loss claim was not reproduced. The code did not remember hardware mode and explicitly saved Enable touch as off whenever requesting mode; these recovery gaps were corrected.
+- Added atomic, versioned setup storage with a last-good backup, old-preference migration, visible save errors and offline profile editing. The new 0.1.4 app loaded the existing controller/display, pinch and enabled preferences and showed Reconnect automatically enabled while the controller was disconnected.
+- Added automatic startup/reconnect/wake recovery and bounded retries. A known controller can inherit its selected profile on a different USB port only when matching is unambiguous. The target display remains explicit. A remembered successful mode-2 request is restored using only the advertised standard feature; existing pinch-enabled profiles migrate that requirement.
+- All 93 tests pass, including seven app-level tests using simulated HID connections. Both release architectures compile. Actual sensor disconnect/reconnect, hardware mode restoration, sleep/wake and login startup on the kiosk Mac remain pending because the sensor is connected to the other Mac.
 
 ## Required before claiming full ASUS compatibility
 

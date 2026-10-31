@@ -12,7 +12,7 @@ enum MacTouchApplication {
     }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelegate {
     private let model = AppModel()
     private var item: NSStatusItem!
     private var window: NSWindow?
@@ -67,6 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let value = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 760),
                                  styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
             value.title = "MacTouch"
+            value.delegate = self
             value.titlebarAppearsTransparent = true
             value.isReleasedWhenClosed = false
             value.minSize = NSSize(width: 920, height: 680)
@@ -80,6 +81,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func toggleTouch() { model.enabled.toggle() }
     @objc private func rescan() { model.rescan() }
     @objc private func quit() { NSApp.terminate(nil) }
+    func windowWillClose(_ notification: Notification) {
+        // A closed tester must not leave a background kiosk bridge paused.
+        // Reopening starts on Connection rather than a hidden tester page.
+        model.touchTesterActive = false
+        window?.contentView = nil
+        window = nil
+    }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showWindow(); return true }
     func applicationWillTerminate(_ notification: Notification) { model.stop() }

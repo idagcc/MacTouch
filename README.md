@@ -4,13 +4,15 @@ A native macOS menu-bar app that translates compatible external touchscreen inpu
 
 This is a working development preview, not a universal replacement for UPDD. It contains real HID discovery, report decoding and Quartz output; the empty device list on a Mac without a touchscreen is intentional.
 
-**Test build:** [Download MacTouch v0.1.3 for Apple silicon and Intel](https://github.com/idagcc/MacTouch/releases/download/v0.1.3/MacTouch.zip). See the [release notes](https://github.com/idagcc/MacTouch/releases/tag/v0.1.3) and [tester guide](docs/TESTING.md) before testing.
+**Test build:** [Download MacTouch v0.1.4 for Apple silicon and Intel](https://github.com/idagcc/MacTouch/releases/download/v0.1.4/MacTouch.zip). See the [release notes](https://github.com/idagcc/MacTouch/releases/tag/v0.1.4) and [tester guide](docs/TESTING.md) before testing.
 
 Version 0.1.1 fixed serial touchscreen reports replacing one held finger with another, and a preview refresh bug that could hide a rapidly added second finger. Those fixes remain included.
 
 Version **0.1.2** adds a touch tester and mouse-driven simulator. A user-assisted test on the connected **CoolTouchR System (2575:0401)** received real sensor reports with **five simultaneous contacts**, after enabling Input Monitoring and requesting standard multitouch mode (0 → 2). This verifies multi-contact reception on that controller; full pointer/scroll behavior and the exact monitor model remain unverified. See the [hardware session notes](docs/VALIDATION.md).
 
 Version **0.1.3** adds opt-in **pinch zoom for embedded maps**. With that setting enabled, the user confirmed that a physical pinch zoomed the actual Google Maps iframe in Safari in both directions. It uses Command + scroll over the mapped pinch midpoint; it does not synthesize native trackpad magnification.
+
+Version **0.1.4** remembers kiosk setup in an atomic settings file with a last-good backup, migrates existing preferences, and adds **Reconnect automatically**. It restores remembered multitouch mode in the background after startup/reconnect/wake, retries temporary failures, and keeps the saved Enable touch choice. A uniquely matching controller can reconnect on a different USB port without discarding its profile. Identical ambiguous controllers and missing target displays are not guessed.
 
 ## Try the app
 
@@ -20,7 +22,13 @@ Version **0.1.3** adds opt-in **pinch zoom for embedded maps**. With that settin
 4. Allow **Pointer control** in macOS Accessibility. If touch reports do not arrive, allow **Input Monitoring**, quit/reopen MacTouch, and rescan.
 5. Open **Touch tester → Sensor** and confirm numbered dots appear. This also works with only the sensor's USB cable connected, showing its surface on the selected Mac display. If touching only moves the cursor, use **Request multitouch mode** in the tester or Diagnostics, then check for separate contacts without rescanning.
 6. Return to **Connection** and turn on **Enable touch**. Touch and lift once to arm the pointer, then tap, drag or scroll with two fingers. Pointer output pauses while the tester is open.
-7. In **Touch settings**, enable **Launch MacTouch at login**. Closing the window keeps the bridge running in the menu bar. Use the menu-bar icon to pause, reopen or quit.
+7. In **Touch settings**, leave **Reconnect automatically** on and enable **Launch MacTouch at login**. Closing the window keeps the bridge running in the menu bar. Use the menu-bar icon to pause, reopen or quit.
+
+## One-time kiosk setup
+
+Install the app in **Applications** before granting permissions. Select the controller and target display, enable any needed map pinch setting, and verify multitouch once with **Request multitouch mode**. Leave **Reconnect automatically**, **Enable touch** and **Launch MacTouch at login** on, then close the setup window. The app runs in the menu bar after sign-in. Routine USB reconnections restore the saved setup without reopening Settings; lift all fingers before resuming. A deliberately paused controller remains paused.
+
+Physical reconnect on the kiosk Mac remains a tester acceptance step. Recovery has been exercised with simulated controller connections and app-level tests; the sensor was on the other Mac during 0.1.4 development. One-time permissions, a missing display, ambiguous identical hardware and a broken USB/power connection still require setup or maintenance.
 
 The local build is ad-hoc signed, not Apple-notarized. Production distribution needs your Developer ID identity and notarization. A clean Mac may block this development build under its normal security policy; use your own signed build for deployment rather than disabling platform protections.
 
@@ -35,12 +43,14 @@ When updating an ad-hoc signed build, Input Monitoring may appear enabled while 
 - **Embedded-map pinch zoom:** opt in with **Touch settings → Pinch zoom for embedded maps**. Finger separation becomes Command-modified pixel-wheel input at the mapped midpoint, using Google Maps' [documented zoom input](https://developers.google.com/maps/documentation/javascript/interaction). Moving fingers together remains scrolling; lift both before changing gesture. This is map input translation, not native trackpad magnification or Safari page zoom. The Sensor tester includes a pinch/scroll detector preview without sending output.
 - **Touch tester:** a large contact map with numbered, color-coded fingers, coordinates, current/peak counts, and two-/three-finger milestones. Open **Touch tester → Sensor** to measure the selected USB controller without controlling the pointer. Only Input Monitoring is needed for this view; its video cable and Accessibility permission are not required. **Simulation** lets you create 1, 2, 3, 5 or 10 points and drag them with your mouse without permissions. Simulation stays separate from sensor measurements and diagnostics. Reset peak starts new measurements for the selected controller.
 - Native SwiftUI setup window and menu-bar controls; no Dock icon required.
+- Durable setup in `~/Library/Application Support/MacTouch/settings.json`, with a previous-good backup and migration from older UserDefaults profiles. Saved settings remain editable while the controller is unplugged; save failures are shown.
+- Optional background controller recovery with bounded retry delays, standard multitouch-mode restoration and unique USB-identity matching across ports. Diagnostic-only runs never restore hardware mode or save preferences.
 - macOS 13+ login startup through `SMAppService.mainApp`.
 - Touchscreen-only HID matching; keyboard and ordinary mouse input are not captured.
 - Per-interface report parsing with report IDs, packed fields, signed coordinate ranges, nested finger collections, confidence and contact IDs.
 - Standard serial contact updates retain every contact ID until it lifts. Complete-frame single/parallel touch and bounded hybrid-frame assembly are also supported when required metadata is available.
-- One selected touch controller mapped to one selected display; global display coordinates handle negative origins and Retina layouts.
-- Rotation, axis flips, scroll speed and saved profiles. USB interface identity distinguishes composite devices. If stable identity is unavailable, reconnect requires reselection.
+- One selected touch controller mapped to one selected display; global display coordinates handle negative origins and Retina layouts. Closing a tester window resumes normal background control and reopens on Connection.
+- Rotation, axis flips, scroll speed and saved profiles. USB interface identity and descriptor fingerprints distinguish known controllers; unique matches can recover changed session IDs, while ambiguous identical devices require selection.
 - Click/double-click, drag and two-finger scrolling. Additional fingers suppress output until all lift.
 - Release/cancel on pause, disconnect, display changes, sleep, user-session changes, malformed input and permission revocation.
 - Live touch preview updates immediately when fingers are added or removed. Local JSON diagnostics include current/peak contact counts, report IDs/framing, mode request/readback, controller descriptors, display layout and permissions. No serial numbers, keystrokes, touch history or network telemetry are collected.

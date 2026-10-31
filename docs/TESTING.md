@@ -1,10 +1,10 @@
-# MacTouch 0.1.3 tester guide
+# MacTouch 0.1.4 tester guide
 
-Download [MacTouch.zip](https://github.com/idagcc/MacTouch/releases/download/v0.1.3/MacTouch.zip). This development preview targets macOS 13+ and contains both Apple silicon and Intel builds. It is a macOS app and does not run on Windows. Physical input with five simultaneous contacts was verified on a CoolTouchR System controller (USB 2575:0401). The user also confirmed physical pinch zoom in both directions on an embedded Google Map in Safari. General pointer/scroll operation and other monitor models remain unverified. The app is not Apple-notarized.
+Download [MacTouch.zip](https://github.com/idagcc/MacTouch/releases/download/v0.1.4/MacTouch.zip). This development preview targets macOS 13+ and contains both Apple silicon and Intel builds. It is a macOS app and does not run on Windows. Physical input with five simultaneous contacts was verified on a CoolTouchR System controller (USB 2575:0401). The user also confirmed physical pinch zoom in both directions on an embedded Google Map in Safari. The 0.1.4 recovery logic is covered by app-level tests; physical reconnect on the kiosk Mac still needs checking. The app is not Apple-notarized.
 
 ## Test touch points on another Mac
 
-1. Quit the old MacTouch from its menu-bar icon before replacing it in **Applications**. Open the new app and confirm the sidebar says **0.1.3**.
+1. Quit the old MacTouch from its menu-bar icon before replacing it in **Applications**. Open the new app and confirm the sidebar says **0.1.4**.
 2. Connect the sensor's USB cable, open **Touch tester → Sensor**, and choose its controller. The sensor's video cable is not needed to show its surface on your Mac's display.
 3. Enable MacTouch under **Privacy & Security → Input Monitoring**, then quit/reopen MacTouch. Accessibility is only needed later for cursor control.
 4. If Input Monitoring already appears on but no sensor frames arrive after updating, remove the old MacTouch entry with **−**, add the current app from Applications with **+**, and choose **Quit & Reopen**. This refresh was necessary for the locally rebuilt ad-hoc signed app.
@@ -12,7 +12,20 @@ Download [MacTouch.zip](https://github.com/idagcc/MacTouch/releases/download/v0.
 6. Hold one finger down, add a second and then a third, and move each. The numbered points should remain separate. Lift them individually and verify **3 → 2 → 1 → 0**. **Most together** should remain at least 3. **Reset peak** starts a fresh measurement, retaining any currently held fingers.
 7. Use **Simulation** to try 1, 2, 3, 5 or 10 mouse-generated points, drag points independently, and use **Lift all**. This requires no sensor or permissions and does not count toward the sensor's measured peak.
 
-Pointer control pauses while **Touch tester** is selected. Return to **Connection** before testing clicks or scrolling. A mode-2 readback alone does not prove physical multitouch; the sensor's measured peak is the relevant evidence. If it still shows one point or zero frames, export diagnostics and share the controller name, USB ID and exact monitor model. USB reconnects may restore the default controller mode; request multitouch mode again if needed.
+Pointer control pauses while **Touch tester** is visible. Return to **Connection** before testing clicks or scrolling. Closing the tester window also resumes normal background control, retaining your saved Enable touch choice. A mode-2 readback alone does not prove physical multitouch; the sensor's measured peak is the relevant evidence. If it still shows one point or zero frames, export diagnostics and share the controller name, USB ID and exact monitor model. Once automatic recovery is configured, remembered multitouch mode is restored after reconnection.
+
+## One-time kiosk setup and reconnect test
+
+1. Keep the app in **Applications**, allow its permissions, and select the controller and the actual target display. Existing 0.1.3 options are migrated automatically.
+2. In **Touch settings**, turn on **Reconnect automatically** and any desired map-pinch option. Confirm multitouch once with **Request multitouch mode**; a verified mode-2 request is remembered. Older pinch-enabled profiles also request multitouch automatically.
+3. Return to **Connection**, leave **Enable touch** on, and turn on **Launch MacTouch at login** in Touch settings. Close the window to keep it running in the menu bar.
+4. Quit/reopen MacTouch. Confirm controller selection, target display, rotation/flips, scroll speed, map pinch, automatic reconnect and Enable touch retain their saved values. No mode-request button should be needed after a remembered successful setup.
+5. With the app running in the background, unplug/reconnect the sensor. Lift all fingers, then test touch and map pinch. Repeat on another USB port with only this controller connected. Settings should return automatically; the app waits rather than guessing between multiple identical matching controllers.
+6. Test sleep/wake and a full sign-out/sign-in with login startup enabled. These remain physical acceptance checks on the kiosk Mac, not claims established by automated tests.
+
+Temporary setup failures retry in the background with delays of 1, 2, 4, 8, 16 and then at most 30 seconds. A deliberate pause stays paused. The saved display is preserved if disconnected; touches are not redirected to a different screen. Permissions may need a one-time refresh after replacing this ad-hoc signed development build.
+
+Settings save automatically in `~/Library/Application Support/MacTouch/settings.json`, with `settings.previous.json` as a last-good backup. Both contain setup preferences only. Save errors are shown instead of silently claiming persistence.
 
 ## Install and connect
 

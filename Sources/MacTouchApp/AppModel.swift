@@ -11,20 +11,34 @@ struct ConnectedDisplay: Identifiable {
     let bounds: CGRect
 }
 
-private struct DeviceProfile: Codable {
-    var displayID = ""
-    var pointer = PointerConfiguration()
-}
-
 final class AppModel: ObservableObject {
     @Published var devices: [TouchDevice] = []
     @Published var displays: [ConnectedDisplay] = []
     @Published var selectedDeviceID: String {
-        didSet { resetInput(resetTouchState: true); resetTouchTest(); defaults.set(selectedDeviceID, forKey: "selectedDevice"); loadProfile() }
+        didSet {
+            resetInput(resetTouchState: true); resetTouchTest(); recovery.reset()
+            if !diagnosticMode { checkSettingsSave(settings.selectDevice(selectedDeviceID)) }
+            loadProfile(); scheduleRecovery()
+        }
     }
     @Published var selectedDisplayID = "" { didSet { resetInput(); saveProfile() } }
-    @Published var configuration = PointerConfiguration() { didSet { resetInput(); saveProfile() } }
-    @Published var enabled: Bool { didSet { resetInput(); defaults.set(enabled, forKey: "enabled") } }
+    @Published var configuration = PointerConfiguration() {
+        didSet {
+            resetInput()
+            if !loadingProfile && configuration.mapPinchZoom && !restoreMultitouchMode {
+                restoreMultitouchMode = true; recovery.reset()
+            }
+            saveProfile(); scheduleRecovery()
+        }
+    }
+    @Published var enabled: Bool {
+        didSet { resetInput(); if !diagnosticMode { checkSettingsSave(settings.setEnabled(enabled)) }; scheduleRecovery() }
+    }
+    @Published var automaticReconnect = true {
+        didSet { if !loadingProfile { recovery.reset(); saveProfile(); scheduleRecovery() } }
+    }
+    @Published private(set) var recoveryStatus = "Waiting for the saved controller"
+    @Published private(set) var applyingDeviceMode = false
     @Published var accessibilityAllowed = false
     @Published var inputAllowed = false
     @Published var loginEnabled = false
@@ -40,12 +54,19 @@ final class AppModel: ObservableObject {
     @Published private(set) var touchTest = TouchTestSession()
     @Published private(set) var gestureTestText = "Place two fingers to test pinch or scroll"
     @Published private(set) var gestureTestScale = 1.0
-    let hid = HIDService()
-    private let defaults = UserDefaults.standard
+    let hid: TouchInputService
+    private let accessibilityCheck: () -> Bool
+    private let inputMonitoringCheck: () -> Bool
+    private let settings: DeviceSettingsStore
+    private let diagnosticMode: Bool
     private let output = PointerOutput()
     private var engine = PointerEngine()
-    private var profiles: [String: DeviceProfile] = [:]
     private var loadingProfile = false
+    private var restoreMultitouchMode = false
+    private var profileFingerprint: ControllerFingerprint?
+    private var recovery = ControllerRecovery()
+    private var recoveryScheduled = false
+    private var hasStarted = false
     private var observers: [NSObjectProtocol] = []
     private var timer: Timer?
     private var lastFrameTime = ProcessInfo.processInfo.systemUptime
@@ -59,22 +80,30 @@ final class AppModel: ObservableObject {
     private var hasActiveInput = false
     private var suspensionReasons: Set<String> = []
 
-    init() {
-        selectedDeviceID = UserDefaults.standard.string(forKey: "selectedDevice") ?? ""
-        enabled = CommandLine.arguments.contains("--diagnose") ? false : UserDefaults.standard.bool(forKey: "enabled")
-        if let data = defaults.data(forKey: "deviceProfiles"),
-           let saved = try? JSONDecoder().decode([String: DeviceProfile].self, from: data) { profiles = saved }
+    init(settings: DeviceSettingsStore = .init(), hid: TouchInputService = HIDService(),
+         accessibilityCheck: @escaping () -> Bool = { AXIsProcessTrusted() && CGPreflightPostEventAccess() },
+         inputMonitoringCheck: @escaping () -> Bool = { IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted },
+         diagnosticMode: Bool = CommandLine.arguments.contains("--diagnose")) {
+        self.settings = settings
+        self.diagnosticMode = diagnosticMode
+        self.hid = hid; self.accessibilityCheck = accessibilityCheck
+        self.inputMonitoringCheck = inputMonitoringCheck
+        selectedDeviceID = settings.selectedDeviceID
+        enabled = diagnosticMode ? false : settings.enabled
         loadProfile()
-        hid.onDevices = { [weak self] in self?.devices = $0 }
+        hid.onDevices = { [weak self] in self?.devices = $0; self?.scheduleRecovery() }
         hid.onFrame = { [weak self] in self?.receive(id: $0, frame: $1) }
         hid.onFailure = { [weak self] id, error in
             guard let self, id == self.selectedDeviceID else { return }
             self.resetInput(resetTouchState: true)
+            self.recovery.disconnected(); self.scheduleRecovery()
             self.notice = "Touch input stopped: \(error) Export diagnostics to add support for this controller."
         }
         hid.onRemoved = { [weak self] id in
             guard let self, id == self.selectedDeviceID else { return }
             self.resetInput(resetTouchState: true)
+            self.recovery.disconnected()
+            self.recoveryStatus = self.automaticReconnect ? "Waiting to reconnect automatically" : "Controller disconnected"
         }
         hid.onIdentityInvalidated = { [weak self] id in
             guard let self, id == self.selectedDeviceID else { return }
@@ -86,13 +115,18 @@ final class AppModel: ObservableObject {
 
     var selectedDevice: TouchDevice? { devices.first { $0.id == selectedDeviceID } }
     var selectedDisplay: ConnectedDisplay? { displays.first { $0.id == selectedDisplayID } }
-    var canBridge: Bool { selectedDevice?.usable == true && selectedDisplay != nil && accessibilityAllowed && !suspended && !touchTesterActive }
+    var canBridge: Bool {
+        selectedDevice?.usable == true && selectedDisplay != nil && accessibilityAllowed && inputAllowed
+            && !suspended && !touchTesterActive && !applyingDeviceMode
+            && (!automaticReconnect || !restoreMultitouchMode || recovery.ready)
+    }
     var headline: String {
         if suspended { return "Paused while your Mac is asleep" }
         if touchTesterActive { return "Touch tester · pointer control paused" }
         if devices.isEmpty { return "Connect your touchscreen" }
         if selectedDevice == nil { return "Choose a touch controller" }
         if !inputAllowed { return "Allow Input Monitoring to read touches" }
+        if automaticReconnect && restoreMultitouchMode && !recovery.ready { return recoveryStatus }
         if selectedDevice?.usable == false { return "This controller needs a profile" }
         if selectedDisplay == nil { return "Choose the touchscreen display" }
         if !accessibilityAllowed { return "Allow pointer control" }
@@ -102,8 +136,11 @@ final class AppModel: ObservableObject {
     var isRunning: Bool { enabled && canBridge && !waitingForLift }
 
     func start() {
+        if !diagnosticMode { checkSettingsSave(settings.flush()) }
         refreshDisplays(); refreshPermissions(); refreshLogin()
         hid.start()
+        hasStarted = true
+        scheduleRecovery()
         let nc = NotificationCenter.default
         observers.append(nc.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in self?.refreshDisplays() })
         let workspace = NSWorkspace.shared.notificationCenter
@@ -133,9 +170,12 @@ final class AppModel: ObservableObject {
         timer = heartbeat
     }
 
-    func stop() { timer?.invalidate(); resetInput(); hid.stop() }
+    func stop() {
+        hasStarted = false; timer?.invalidate(); resetInput(); hid.stop()
+        if !diagnosticMode { checkSettingsSave(settings.flush()) }
+    }
 
-    func rescan() { notice = nil; resetInput(); refreshPermissions(); refreshDisplays(); hid.rescan() }
+    func rescan() { notice = nil; recovery.reset(); resetInput(); refreshPermissions(); refreshDisplays(); hid.rescan(); scheduleRecovery() }
 
     func resetTouchTest() {
         touchTestSession.reset()
@@ -180,9 +220,17 @@ final class AppModel: ObservableObject {
     }
 
     func requestMultitouchMode() {
-        enabled = false
+        guard let device = selectedDevice else { return }
+        applyingDeviceMode = true
         resetInput(resetTouchState: true)
+        _ = recovery.shouldAttempt(connection: device.connectionID, now: ProcessInfo.processInfo.systemUptime)
         notice = hid.requestMultitouchMode(for: selectedDeviceID)
+        let confirmed = hid.currentDevices().first(where: { $0.id == selectedDeviceID })?.inputModeAfter == 2
+        recovery.complete(confirmed: confirmed)
+        if confirmed { restoreMultitouchMode = true; saveProfile() }
+        applyingDeviceMode = false
+        recoveryStatus = confirmed ? "Connected · saved multitouch mode restored" : "Multitouch mode could not be confirmed"
+        resetInput(resetTouchState: true)
     }
 
     func requestAccessibility() {
@@ -222,10 +270,12 @@ final class AppModel: ObservableObject {
     }
 
     private func refreshPermissions() {
-        accessibilityAllowed = AXIsProcessTrusted() && CGPreflightPostEventAccess()
+        accessibilityAllowed = accessibilityCheck()
         let previouslyAllowedInput = inputAllowed
-        inputAllowed = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted
+        inputAllowed = inputMonitoringCheck()
         if (wasAllowed && !accessibilityAllowed) || (previouslyAllowedInput && !inputAllowed) { resetInput(resetTouchState: true) }
+        if previouslyAllowedInput && !inputAllowed { recovery.disconnected() }
+        if hasStarted && !previouslyAllowedInput && inputAllowed { recovery.reset(); hid.rescan() }
         wasAllowed = accessibilityAllowed
     }
 
@@ -284,6 +334,7 @@ final class AppModel: ObservableObject {
 
     private func tick() {
         refreshPermissions(); refreshLogin()
+        recoverConnection()
         // A failed controller must not leave the system in a held mouse-button state.
         if (hasActiveInput || !contacts.isEmpty) && ProcessInfo.processInfo.systemUptime - lastFrameTime > 10 {
             resetInput(resetTouchState: true)
@@ -293,15 +344,89 @@ final class AppModel: ObservableObject {
 
     private func loadProfile() {
         loadingProfile = true
-        let profile = profiles[selectedDeviceID] ?? DeviceProfile()
+        let profile = settings.profile(for: selectedDeviceID) ?? DeviceProfile()
         selectedDisplayID = profile.displayID; configuration = profile.pointer
+        automaticReconnect = profile.automaticReconnect
+        restoreMultitouchMode = profile.restoreMultitouchMode
+        profileFingerprint = profile.fingerprint
         loadingProfile = false
     }
 
     private func saveProfile() {
-        guard !loadingProfile, !selectedDeviceID.isEmpty else { return }
-        profiles[selectedDeviceID] = DeviceProfile(displayID: selectedDisplayID, pointer: configuration)
-        if let data = try? JSONEncoder().encode(profiles) { defaults.set(data, forKey: "deviceProfiles") }
+        guard !diagnosticMode, !loadingProfile, !selectedDeviceID.isEmpty else { return }
+        let profile = DeviceProfile(displayID: selectedDisplayID, pointer: configuration,
+            automaticReconnect: automaticReconnect, restoreMultitouchMode: restoreMultitouchMode,
+            fingerprint: selectedDevice?.fingerprint ?? profileFingerprint)
+        checkSettingsSave(settings.saveProfile(profile, for: selectedDeviceID))
+    }
+
+    private func checkSettingsSave(_ succeeded: Bool) {
+        if !succeeded {
+            notice = "Could not save this setup: \(settings.lastError ?? "storage is unavailable"). Keep MacTouch open until storage is available."
+        }
+    }
+
+    private func scheduleRecovery() {
+        guard hasStarted, !diagnosticMode, !loadingProfile, !recoveryScheduled else { return }
+        recoveryScheduled = true
+        // HID publishes while a feature request is running. Queue recovery
+        // rather than reentering a device callback or starting a second write.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.recoveryScheduled = false
+            self.recoverConnection()
+        }
+    }
+
+    private func recoverConnection() {
+        guard hasStarted, !diagnosticMode, !loadingProfile, !applyingDeviceMode, !suspended else { return }
+        guard let device = selectedDevice else {
+            if !selectedDeviceID.isEmpty, let saved = settings.profile(for: selectedDeviceID),
+               let replacement = ControllerReconnect.matchingDevice(savedID: selectedDeviceID, profile: saved,
+                    connected: devices.filter(\.formatSupported).map { ReconnectCandidate(id: $0.id, fingerprint: $0.fingerprint) }),
+               replacement != selectedDeviceID {
+                var restored = saved
+                restored.fingerprint = devices.first(where: { $0.id == replacement })?.fingerprint ?? saved.fingerprint
+                checkSettingsSave(settings.saveProfile(restored, for: replacement))
+                selectedDeviceID = replacement
+                recoveryStatus = "Controller found · restoring saved setup"
+            } else {
+                recoveryStatus = automaticReconnect ? "Waiting to reconnect the saved controller" : "Controller disconnected"
+            }
+            return
+        }
+        if let fingerprint = device.fingerprint, profileFingerprint != fingerprint {
+            profileFingerprint = fingerprint
+            saveProfile()
+        }
+        guard automaticReconnect else { recoveryStatus = "Automatic reconnect is off"; return }
+        guard inputAllowed else { recoveryStatus = "Waiting for Input Monitoring permission"; return }
+        guard device.formatSupported else { recoveryStatus = "This controller needs a supported touch format"; return }
+        let now = ProcessInfo.processInfo.systemUptime
+        if restoreMultitouchMode && device.supportsMultitouchMode {
+            guard recovery.shouldAttempt(connection: device.connectionID, now: now) else {
+                recoveryStatus = recovery.ready ? "Connected · saved setup restored" : "Retrying controller setup automatically"
+                return
+            }
+            applyingDeviceMode = true
+            resetInput(resetTouchState: true)
+            _ = hid.requestMultitouchMode(for: selectedDeviceID)
+            let confirmed = hid.currentDevices().first(where: { $0.id == selectedDeviceID })?.inputModeAfter == 2
+            recovery.complete(confirmed: confirmed)
+            applyingDeviceMode = false
+            resetInput(resetTouchState: true)
+            recoveryStatus = confirmed ? "Connected · multitouch and saved setup restored" : "Retrying multitouch setup automatically"
+            if confirmed, notice?.hasPrefix("Touch input stopped:") == true { notice = nil }
+        } else if !device.usable {
+            guard recovery.shouldAttempt(connection: device.connectionID, now: now) else { return }
+            recoveryStatus = "Reopening the controller automatically"
+            resetInput(resetTouchState: true)
+            hid.rescan()
+        } else {
+            recovery.complete(confirmed: true)
+            recoveryStatus = restoreMultitouchMode ? "Connected · no controller mode change needed" : "Connected · saved setup restored"
+            if notice?.hasPrefix("Touch input stopped:") == true { notice = nil }
+        }
     }
 
     func exportDiagnostics() {
@@ -318,10 +443,15 @@ final class AppModel: ObservableObject {
 
     func diagnosticsData() throws -> Data {
         let payload: [String: Any] = [
-            "appVersion": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.3", "macOS": ProcessInfo.processInfo.operatingSystemVersionString,
+            "appVersion": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.4", "macOS": ProcessInfo.processInfo.operatingSystemVersionString,
             "accessibility": accessibilityAllowed, "inputMonitoring": inputAllowed,
             "serviceStatus": serviceStatus, "selectedDevice": selectedDeviceID,
             "selectedDisplay": selectedDisplayID, "enabled": enabled,
+            "savedEnabled": settings.enabled, "automaticReconnect": automaticReconnect,
+            "restoreMultitouchMode": restoreMultitouchMode, "recoveryStatus": recoveryStatus,
+            "pointerSettings": ["rotation": configuration.rotation, "invertX": configuration.invertX,
+                "invertY": configuration.invertY, "twoFingerScroll": configuration.twoFingerScroll,
+                "scrollSpeed": configuration.scrollSpeed, "mapPinchZoom": configuration.mapPinchZoom],
             "touchTest": ["currentContacts": touchTest.currentContacts, "peakContacts": touchTest.peakContacts, "frames": touchTest.frames],
             "devices": hid.currentDevices().map { device -> [String: Any] in [
                 "id": device.id, "name": device.name, "vendorID": device.vendorID, "productID": device.productID,
