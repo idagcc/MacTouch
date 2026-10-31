@@ -20,7 +20,7 @@ final class AppModel: ObservableObject {
     @Published var devices: [TouchDevice] = []
     @Published var displays: [ConnectedDisplay] = []
     @Published var selectedDeviceID: String {
-        didSet { resetInput(); defaults.set(selectedDeviceID, forKey: "selectedDevice"); loadProfile() }
+        didSet { resetInput(resetTouchState: true); defaults.set(selectedDeviceID, forKey: "selectedDevice"); loadProfile() }
     }
     @Published var selectedDisplayID = "" { didSet { resetInput(); saveProfile() } }
     @Published var configuration = PointerConfiguration() { didSet { resetInput(); saveProfile() } }
@@ -61,7 +61,8 @@ final class AppModel: ObservableObject {
         hid.onFrame = { [weak self] in self?.receive(id: $0, frame: $1) }
         hid.onFailure = { [weak self] id, error in
             guard let self, id == self.selectedDeviceID else { return }
-            self.resetInput(); self.notice = "Touch input stopped: \(error) Export diagnostics to add support for this controller."
+            self.resetInput(); self.contacts = []
+            self.notice = "Touch input stopped: \(error) Export diagnostics to add support for this controller."
         }
         hid.onRemoved = { [weak self] id in
             guard let self, id == self.selectedDeviceID else { return }
@@ -100,7 +101,7 @@ final class AppModel: ObservableObject {
             observers.append(workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 guard let self else { return }
                 self.suspensionReasons.insert(name.rawValue)
-                self.suspended = true; self.resetInput()
+                self.suspended = true; self.resetInput(resetTouchState: true)
             })
         }
         let resumeEvents: [(Notification.Name, Notification.Name)] = [
@@ -113,7 +114,7 @@ final class AppModel: ObservableObject {
                 guard let self else { return }
                 self.suspensionReasons.remove(reason.rawValue)
                 self.suspended = !self.suspensionReasons.isEmpty
-                self.resetInput(); self.refreshDisplays()
+                self.resetInput(resetTouchState: true); self.refreshDisplays()
                 if !self.suspended { self.hid.rescan() }
             })
         }
@@ -128,6 +129,7 @@ final class AppModel: ObservableObject {
 
     func requestMultitouchMode() {
         enabled = false
+        contacts = []
         notice = hid.requestMultitouchMode(for: selectedDeviceID)
     }
 
@@ -171,7 +173,7 @@ final class AppModel: ObservableObject {
         accessibilityAllowed = AXIsProcessTrusted() && CGPreflightPostEventAccess()
         let previouslyAllowedInput = inputAllowed
         inputAllowed = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted
-        if (wasAllowed && !accessibilityAllowed) || (previouslyAllowedInput && !inputAllowed) { resetInput() }
+        if (wasAllowed && !accessibilityAllowed) || (previouslyAllowedInput && !inputAllowed) { resetInput(resetTouchState: true) }
         wasAllowed = accessibilityAllowed
     }
 
@@ -189,9 +191,13 @@ final class AppModel: ObservableObject {
 
     private func receive(id: String, frame: TouchFrame) {
         guard id == selectedDeviceID else { return }
+        guard !suspended else { hid.resetDecoder(for: id); return }
         let now = ProcessInfo.processInfo.systemUptime
         lastFrameTime = now; receivedFrames += 1
-        if now - lastUIUpdate > 1.0 / 30.0 || frame.contacts.isEmpty {
+        // A second finger may arrive within the same UI tick and then stay still.
+        // Never throttle contact membership changes; throttle only position updates.
+        let changedIDs = Set(contacts.map(\.id)) != Set(frame.contacts.map(\.id))
+        if changedIDs || now - lastUIUpdate > 1.0 / 30.0 || frame.contacts.isEmpty {
             contacts = frame.contacts; frameCount = receivedFrames
             lastTouch = frame.contacts.isEmpty ? "All fingers lifted" : "\(frame.contacts.count) contact\(frame.contacts.count == 1 ? "" : "s") received"
             lastUIUpdate = now
@@ -205,18 +211,23 @@ final class AppModel: ObservableObject {
         hasActiveInput = !frame.contacts.isEmpty
     }
 
-    private func resetInput() {
+    private func resetInput(resetTouchState: Bool = false) {
         output.send(engine.cancel())
         output.resetScroll()
         hasActiveInput = false
         waitingForLift = true
+        if resetTouchState {
+            hid.resetDecoder(for: selectedDeviceID)
+            contacts = []
+        }
     }
 
     private func tick() {
         refreshPermissions(); refreshLogin()
         // A failed controller must not leave the system in a held mouse-button state.
-        if hasActiveInput && ProcessInfo.processInfo.systemUptime - lastFrameTime > 10 {
-            resetInput(); contacts = []
+        if (hasActiveInput || !contacts.isEmpty) && ProcessInfo.processInfo.systemUptime - lastFrameTime > 10 {
+            resetInput(resetTouchState: true)
+            lastTouch = "Input timed out. Lift all fingers before touching again."
         }
     }
 
@@ -247,14 +258,19 @@ final class AppModel: ObservableObject {
 
     func diagnosticsData() throws -> Data {
         let payload: [String: Any] = [
-            "appVersion": "0.1.0", "macOS": ProcessInfo.processInfo.operatingSystemVersionString,
+            "appVersion": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.1", "macOS": ProcessInfo.processInfo.operatingSystemVersionString,
             "accessibility": accessibilityAllowed, "inputMonitoring": inputAllowed,
             "serviceStatus": serviceStatus, "selectedDevice": selectedDeviceID,
             "selectedDisplay": selectedDisplayID, "enabled": enabled,
-            "devices": devices.map { device -> [String: Any] in [
+            "devices": hid.currentDevices().map { device -> [String: Any] in [
                 "id": device.id, "name": device.name, "vendorID": device.vendorID, "productID": device.productID,
                 "transport": device.transport, "support": device.support, "usable": device.usable,
                 "reports": device.reports, "error": device.error ?? "",
+                "currentContacts": device.currentContacts, "peakContacts": device.peakContacts,
+                "framing": device.framing, "modeStatus": device.modeStatus,
+                "touchReportIDs": device.touchReportIDs.map(Int.init),
+                "inputModeBefore": device.inputModeBefore.map { $0 as Any } ?? NSNull(),
+                "inputModeAfter": device.inputModeAfter.map { $0 as Any } ?? NSNull(),
                 "reportDescriptorHex": device.descriptor.map { String(format: "%02x", $0) }.joined()
             ] },
             "displays": displays.map { ["id": $0.id, "name": $0.name, "bounds": NSStringFromRect($0.bounds)] }

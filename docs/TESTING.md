@@ -1,6 +1,12 @@
-# MacTouch 0.1.0 tester guide
+# MacTouch 0.1.1 tester guide
 
-Download [MacTouch.zip](https://github.com/idagcc/MacTouch/releases/download/v0.1.0/MacTouch.zip). This development preview targets macOS 13+ and contains both Apple silicon and Intel builds. It has not yet been verified on the intended ASUS monitor, and is not Apple-notarized.
+Download [MacTouch.zip](https://github.com/idagcc/MacTouch/releases/download/v0.1.1/MacTouch.zip). This development preview targets macOS 13+ and contains both Apple silicon and Intel builds. Full multi-touch operation has not yet been verified on the intended ASUS monitor, and the app is not Apple-notarized.
+
+## Retesting the one-point issue
+
+Quit the old MacTouch from its menu-bar icon before replacing it in Applications. Open the new app and confirm the sidebar says **0.1.1**. Keep pointer control off, hold two fingers down, then move either finger: Live Touch should show two points, and its peak count should reach at least 2. Lift fingers individually and confirm the counts change from 2 to 1 to 0.
+
+If only one point appears, use **Diagnostics → Request multitouch mode** and read the returned status. There is no need to rescan afterward. Test two fingers again. If it still shows one, export diagnostics and share the controller name, USB ID and exact ASUS model with the maintainer. The report now includes framing, observed contact counts and mode readback to distinguish a decoder issue from device configuration.
 
 ## Install and connect
 

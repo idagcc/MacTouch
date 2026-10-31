@@ -4,7 +4,9 @@ A native macOS menu-bar app that translates compatible external touchscreen inpu
 
 This is a working development preview, not a universal replacement for UPDD. It contains real HID discovery, report decoding and Quartz output; the empty device list on a Mac without a touchscreen is intentional.
 
-**Test build:** [Download MacTouch v0.1.0 for Apple silicon and Intel](https://github.com/idagcc/MacTouch/releases/download/v0.1.0/MacTouch.zip). See the [release notes](https://github.com/idagcc/MacTouch/releases/tag/v0.1.0) and [tester guide](docs/TESTING.md) before testing.
+**Test build:** [Download MacTouch v0.1.1 for Apple silicon and Intel](https://github.com/idagcc/MacTouch/releases/download/v0.1.1/MacTouch.zip). See the [release notes](https://github.com/idagcc/MacTouch/releases/tag/v0.1.1) and [tester guide](docs/TESTING.md) before testing.
+
+Version 0.1.1 fixes serial touchscreen reports replacing one held finger with another, and a preview refresh bug that could hide a rapidly added second finger. These bugs are reproduced and fixed in software; the actual ASUS controller still needs confirmation on hardware.
 
 ## Try the app
 
@@ -20,7 +22,7 @@ The local build is ad-hoc signed, not Apple-notarized. Production distribution n
 
 If no controller appears, check the USB upstream cable, adapter, monitor power and monitor touch setting. Confirm the exact model printed on the ASUS label; VT229H is only a candidate. See [ASUS's connection instructions](https://rog.asus.com/us/support/faq/1047313/).
 
-If only mouse-like input appears, **Diagnostics → Request multitouch mode** can request the standard advertised HID Device Mode feature on the selected controller. It pauses pointer control and checks the feature's type/range before writing. It does not send guessed vendor commands. Rescan afterward and verify real reports. This option has not yet been tested on the user's ASUS monitor.
+If only one point appears with two fingers down, **Diagnostics → Request multitouch mode** can request the standard advertised HID Device Mode feature on the selected controller. It pauses pointer control, checks the feature's type/range, reads the current mode and verifies it after writing. It does not send guessed vendor commands. Check Live Touch without rescanning; rescanning is unnecessary and can reset some devices. A reported mode of 2 confirms the mode readback, not actual multi-contact operation. This option has not yet been tested on the user's ASUS monitor.
 
 ## Implemented
 
@@ -28,20 +30,20 @@ If only mouse-like input appears, **Diagnostics → Request multitouch mode** ca
 - macOS 13+ login startup through `SMAppService.mainApp`.
 - Touchscreen-only HID matching; keyboard and ordinary mouse input are not captured.
 - Per-interface report parsing with report IDs, packed fields, signed coordinate ranges, nested finger collections, confidence and contact IDs.
-- Complete-frame single/parallel touch and bounded hybrid-frame assembly when required metadata is available.
+- Standard serial contact updates retain every contact ID until it lifts. Complete-frame single/parallel touch and bounded hybrid-frame assembly are also supported when required metadata is available.
 - One selected touch controller mapped to one selected display; global display coordinates handle negative origins and Retina layouts.
 - Rotation, axis flips, scroll speed and saved profiles. USB interface identity distinguishes composite devices. If stable identity is unavailable, reconnect requires reselection.
 - Click/double-click, drag and two-finger scrolling. Additional fingers suppress output until all lift.
 - Release/cancel on pause, disconnect, display changes, sleep, user-session changes, malformed input and permission revocation.
-- Live touch preview and local JSON diagnostics containing controller IDs/descriptors, display layout and permission status. No serial numbers, keystrokes, touch history or network telemetry are collected.
+- Live touch preview updates immediately when fingers are added or removed. Local JSON diagnostics include current/peak contact counts, report IDs/framing, mode request/readback, controller descriptors, display layout and permissions. No serial numbers, keystrokes, touch history or network telemetry are collected.
 
 ## Current limits
 
-- No ASUS monitor has been tested yet. A valid descriptor does not prove end-to-end compatibility. Export diagnostics from the target Mac for the next hardware-support pass.
+- Full ASUS multi-touch compatibility remains unverified. A valid descriptor does not prove end-to-end compatibility. Export diagnostics from the target Mac for the next hardware-support pass.
 - Proprietary/non-HID USB controllers, devices requiring vendor activation, ambiguous hybrid/serial layouts and mouse-emulation-only touch interfaces need dedicated profiles.
 - Mouse and scroll translation is not native system-wide multitouch. Pinch/rotate, pressure, stylus handling, right-click and application-specific touch APIs are not implemented.
 - Immediate mouse-down makes dragging responsive; adding a second finger releases that button before scrolling. It can trigger an initial primary click if the second finger arrives later.
-- A ten-second gap in reports during an active gesture releases input and requires a full lift. A controller that reports only changes can therefore have a legitimate long stationary hold cancelled.
+- A ten-second gap in reports with active contacts releases input, clears cached serial contacts and requires a full lift. This also clears stale Live Touch state while pointer control is paused. A controller that reports only changes can therefore have a legitimate long stationary hold cancelled.
 - Login startup occurs after user sign-in. It does not enable FileVault/login-screen touch and does not guarantee restart after a crash. Login registration is implemented but a real logout/login cycle is not automated by the development tests.
 - No DriverKit extension, root daemon, calibration wizard, installer/updater or notarized distribution yet.
 

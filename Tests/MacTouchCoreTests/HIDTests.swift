@@ -301,6 +301,91 @@ final class HIDTests: XCTestCase {
         XCTAssertEqual(try decoder.decode(report: hybridPacket([2], count: 0), timestamp: 1.001)?.contacts.map(\.id), [1, 2])
         XCTAssertEqual(try decoder.decode(report: hybridPacket([1], count: 0, released: [1]), timestamp: 1.002)?.contacts, [])
     }
+
+    func testSerialPacketsAccumulateMultipleHeldContacts() throws {
+        let hid = try HIDDescriptor(data: Data(descriptor()))
+        XCTAssertEqual(hid.framing, .serialContacts)
+        XCTAssertTrue(hid.summary.contains("serial"))
+        var decoder = HIDReportDecoder(descriptor: hid)
+        XCTAssertTrue(decoder.usesSerialContacts)
+        XCTAssertEqual(try decoder.decode(report: Data(slot(id: 1, x: 100, y: 200)), timestamp: 1)?.contacts.map(\.id), [1])
+        XCTAssertEqual(try decoder.decode(report: Data(slot(id: 2, x: 300, y: 400)), timestamp: 1.001)?.contacts.map(\.id), [1, 2])
+        XCTAssertEqual(try decoder.decode(report: Data(slot(id: 3, x: 500, y: 600)), timestamp: 1.002)?.contacts.map(\.id), [1, 2, 3])
+    }
+
+    func testSerialRepeatedContactUpdatesPreserveOtherFingers() throws {
+        var decoder = HIDReportDecoder(descriptor: try HIDDescriptor(data: Data(descriptor())))
+        _ = try decoder.decode(report: Data(slot(id: 1, x: 100, y: 200)), timestamp: 1)
+        _ = try decoder.decode(report: Data(slot(id: 2, x: 300, y: 400)), timestamp: 1.001)
+        let update = try XCTUnwrap(decoder.decode(report: Data(slot(id: 1, x: 4095, y: 0)), timestamp: 1.002))
+        XCTAssertEqual(update.contacts.count, 2)
+        XCTAssertEqual(update.contacts[0], TouchContact(id: 1, x: 1, y: 0))
+        XCTAssertEqual(update.contacts[1].x, 300.0 / 4095, accuracy: 0.000001)
+    }
+
+    func testSerialLiftRemovesOnlyNamedContactAndAllowsReuse() throws {
+        var decoder = HIDReportDecoder(descriptor: try HIDDescriptor(data: Data(descriptor())))
+        _ = try decoder.decode(report: Data(slot(id: 1, x: 100, y: 200)), timestamp: 1)
+        _ = try decoder.decode(report: Data(slot(id: 2, x: 300, y: 400)), timestamp: 1.001)
+        XCTAssertEqual(try decoder.decode(report: Data(slot(tip: 0, id: 1, x: 100, y: 200)), timestamp: 1.002)?.contacts.map(\.id), [2])
+        XCTAssertEqual(try decoder.decode(report: Data(slot(tip: 0, id: 2, x: 300, y: 400)), timestamp: 1.003)?.contacts, [])
+        XCTAssertEqual(try decoder.decode(report: Data(slot(id: 1, x: 4095, y: 0)), timestamp: 1.004)?.contacts, [TouchContact(id: 1, x: 1, y: 0)])
+    }
+
+    func testSerialConfidenceReleaseDoesNotEraseOtherContact() throws {
+        var decoder = HIDReportDecoder(descriptor: try HIDDescriptor(data: Data(descriptor(confidence: true))))
+        _ = try decoder.decode(report: Data(slot(tip: 3, id: 1, x: 100, y: 200)), timestamp: 1)
+        _ = try decoder.decode(report: Data(slot(tip: 3, id: 2, x: 300, y: 400)), timestamp: 1.001)
+        XCTAssertEqual(try decoder.decode(report: Data(slot(tip: 1, id: 1, x: 100, y: 200)), timestamp: 1.002)?.contacts.map(\.id), [2])
+        // A release for an unseen ID cannot delete a different held finger.
+        XCTAssertEqual(try decoder.decode(report: Data(slot(tip: 0, id: 9, x: 0, y: 0)), timestamp: 1.003)?.contacts.map(\.id), [2])
+    }
+
+    func testSerialResetAndDecodeFailureClearAllHeldContacts() throws {
+        var decoder = HIDReportDecoder(descriptor: try HIDDescriptor(data: Data(descriptor())))
+        _ = try decoder.decode(report: Data(slot(id: 1, x: 100, y: 200)), timestamp: 1)
+        decoder.reset()
+        XCTAssertEqual(try decoder.decode(report: Data(slot(id: 2, x: 300, y: 400)), timestamp: 2)?.contacts.map(\.id), [2])
+        XCTAssertThrowsError(try decoder.decode(report: Data([1, 3]), timestamp: 2.001))
+        XCTAssertEqual(try decoder.decode(report: Data(slot(id: 4, x: 300, y: 400)), timestamp: 2.002)?.contacts.map(\.id), [4])
+    }
+
+    func testSerialContactCapAndInvalidTimestampClearState() throws {
+        var decoder = HIDReportDecoder(descriptor: try HIDDescriptor(data: Data(descriptor())))
+        for id: UInt8 in 0..<32 {
+            let frame = try decoder.decode(report: Data(slot(id: id, x: 100, y: 200)), timestamp: Double(id))
+            XCTAssertEqual(frame?.contacts.count, Int(id) + 1)
+        }
+        XCTAssertThrowsError(try decoder.decode(report: Data(slot(id: 32, x: 100, y: 200)), timestamp: 32))
+        XCTAssertEqual(try decoder.decode(report: Data(slot(id: 33, x: 100, y: 200)), timestamp: 33)?.contacts.map(\.id), [33])
+        XCTAssertThrowsError(try decoder.decode(report: Data(slot(id: 34, x: 100, y: 200)), timestamp: 32.999))
+        XCTAssertEqual(try decoder.decode(report: Data(slot(id: 35, x: 100, y: 200)), timestamp: 34)?.contacts.map(\.id), [35])
+    }
+
+    func testNoIdentifierSingleTouchAndCountedFramesRemainStateless() throws {
+        let single = try HIDDescriptor(data: Data(descriptor(identifiers: false)))
+        XCTAssertEqual(single.framing, .completeFrames)
+        var decoder = HIDReportDecoder(descriptor: single)
+        XCTAssertFalse(decoder.usesSerialContacts)
+        _ = try decoder.decode(report: Data([1, 0, 0, 0, 0]), timestamp: 1)
+        XCTAssertEqual(try decoder.decode(report: Data([1, 0xFF, 0x0F, 0, 0]), timestamp: 1.001)?.contacts, [TouchContact(id: 0, x: 1, y: 0)])
+        let counted = try HIDDescriptor(data: Data(descriptor(count: true)))
+        XCTAssertEqual(counted.framing, .completeFrames)
+        decoder = HIDReportDecoder(descriptor: counted)
+        _ = try decoder.decode(report: Data(slot(id: 1, x: 0, y: 0) + [1]), timestamp: 2)
+        XCTAssertEqual(try decoder.decode(report: Data(slot(id: 2, x: 0, y: 0) + [1]), timestamp: 2.001)?.contacts.map(\.id), [2])
+    }
+
+    func testTipAndCentreArraysUseTheIntendedTouchPoint() throws {
+        var bytes = descriptor()
+        let axisStart = try XCTUnwrap(bytes.indices.dropLast().first { bytes[$0] == 0x09 && bytes[$0 + 1] == 0x30 })
+        // Two X values (tip, centre), followed by two Y values (tip, centre).
+        bytes.replaceSubrange(axisStart..<(bytes.count - 2), with: [0x09, 0x30, 0x81, 0x02, 0x09, 0x31, 0x81, 0x02])
+        let hid = try HIDDescriptor(data: Data(bytes))
+        let frame = try XCTUnwrap(hid.decode(report: Data([1, 1, 100, 0, 200, 0, 44, 1, 144, 1])))
+        XCTAssertEqual(frame.contacts[0].x, 100.0 / 4095, accuracy: 0.000001)
+        XCTAssertEqual(frame.contacts[0].y, 300.0 / 4095, accuracy: 0.000001)
+    }
 }
 
 private extension Array where Element == UInt8 {

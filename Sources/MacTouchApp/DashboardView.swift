@@ -65,7 +65,7 @@ struct DashboardView: View {
                 Label("Lives in your menu bar", systemImage: "menubar.rectangle").font(.system(size: 11, weight: .medium))
                 Text("Close this window and touch stays connected.").font(.system(size: 11)).foregroundStyle(.secondary).lineSpacing(3)
             }.padding(14).background(panel, in: RoundedRectangle(cornerRadius: 12))
-            Text("DEVELOPMENT PREVIEW · 0.1").font(.system(size: 9, weight: .medium, design: .monospaced)).foregroundStyle(.tertiary).padding(.top, 10)
+            Text("DEVELOPMENT PREVIEW · 0.1.1").font(.system(size: 9, weight: .medium, design: .monospaced)).foregroundStyle(.tertiary).padding(.top, 10)
         }.padding(18).frame(width: 194).background(Color.black.opacity(0.15))
     }
 
@@ -122,7 +122,7 @@ struct DashboardView: View {
                     HStack {
                         Text("LIVE TOUCH").font(.system(size: 10, weight: .semibold, design: .monospaced)).tracking(1)
                         Spacer()
-                        Text("\(model.contacts.count) points").font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+                        Text("\(model.contacts.count) points · peak \(model.selectedDevice?.peakContacts ?? 0)").font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
                     }
                     TouchCanvas(contacts: model.contacts).frame(height: 194)
                     Text(model.lastTouch).font(.system(size: 11)).foregroundStyle(.secondary)
@@ -196,6 +196,10 @@ struct DashboardView: View {
                         Text(device.name).font(.headline)
                         Text("\(device.transport) · \(device.usbID) · \(device.reports) frames").font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
                         Text(device.support).font(.system(size: 12))
+                        Text("Contacts now: \(device.currentContacts) · Most seen together: \(device.peakContacts)").font(.system(size: 11)).foregroundStyle(.secondary)
+                        if device.modeStatus != "Not requested" {
+                            Text(device.modeStatus).font(.system(size: 11)).foregroundStyle(.secondary).textSelection(.enabled)
+                        }
                         if let error = device.error { Text(error).font(.system(size: 11)).foregroundStyle(.orange).textSelection(.enabled) }
                     }
                 }
@@ -210,7 +214,7 @@ struct DashboardView: View {
             }.padding(24).background(panel, in: RoundedRectangle(cornerRadius: 16))
             VStack(alignment: .leading, spacing: 10) {
                 Text("Built for standard USB touchscreens").font(.headline)
-                Text("This preview supports standard single-touch, parallel multi-touch and split frames with matching scan times. Vendor-specific controllers and ambiguous touch formats may need an additional profile. ASUS hardware compatibility still needs a test on your monitor.")
+                Text("This preview supports standard single-touch, serial contact updates, parallel multi-touch and split frames with matching scan times. Vendor-specific controllers and ambiguous touch formats may need an additional profile. ASUS hardware compatibility still needs a test on your monitor.")
                 Text("Touch is translated into mouse actions. Native trackpad gestures, pinch-to-zoom, pressure and pre-login control are not included.")
                 Text("Diagnostics stay on your Mac unless you choose to share the exported file.")
             }.font(.system(size: 12)).foregroundStyle(.secondary).lineSpacing(4).padding(24).background(panel, in: RoundedRectangle(cornerRadius: 16))

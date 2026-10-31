@@ -13,6 +13,13 @@ struct TouchDevice: Identifiable {
     var support: String
     var usable: Bool
     var reports: Int = 0
+    var currentContacts: Int = 0
+    var peakContacts: Int = 0
+    var framing = "Unknown"
+    var touchReportIDs: [UInt8] = []
+    var modeStatus = "Not requested"
+    var inputModeBefore: Int?
+    var inputModeAfter: Int?
     var error: String?
     var usbID: String { String(format: "%04X:%04X", vendorID, productID) }
 }
@@ -82,11 +89,29 @@ final class HIDService {
 
     func rescan() { stop(); start() }
 
+    func resetDecoder(for selectedID: String) {
+        guard let id = devices.first(where: { $0.value.id == selectedID })?.key else { return }
+        decoders[id]?.reset()
+        frameTimers.removeValue(forKey: id)?.invalidate()
+        devices[id]?.currentContacts = 0
+        publish()
+    }
+
+    func currentDevices() -> [TouchDevice] { devices.values.sorted { $0.name < $1.name } }
+
     /// The standard Device Mode feature is also used by TouchMyMac's input layer.
     /// Only invoked by the user's selected-device action; never writes vendor reports.
     func requestMultitouchMode(for selectedID: String) -> String {
         guard let pair = devices.first(where: { $0.value.id == selectedID }),
               let device = handles[pair.key] else { return "Connect and select a touch controller first." }
+        resetDecoder(for: selectedID)
+        devices[pair.key]?.inputModeBefore = nil
+        devices[pair.key]?.inputModeAfter = nil
+        func finish(_ message: String) -> String {
+            devices[pair.key]?.modeStatus = message
+            publish()
+            return message
+        }
         let matching = [kIOHIDElementUsagePageKey: 0x0D, kIOHIDElementUsageKey: 0x52] as CFDictionary
         let elements = IOHIDDeviceCopyMatchingElements(device, matching, IOOptionBits(kIOHIDOptionsTypeNone)) as? [IOHIDElement] ?? []
         let candidates = elements.filter {
@@ -95,14 +120,61 @@ final class HIDService {
             IOHIDElementGetReportCount($0) == 1
         }
         guard candidates.count == 1, let element = candidates.first else {
-            return "This controller does not advertise a single standard multitouch-mode setting. No change was made."
+            return finish("This interface does not advertise a single writable standard multitouch-mode setting. No change was made. Export diagnostics so its configuration interface can be checked.")
+        }
+        // Feature reads fetch a report from the device (unlike cached input values).
+        // Read the existing report before updating the advertised mode element.
+        let before = readFeatureInteger(device: device, element: element)
+        guard let priorMode = before.value else {
+            return finish("Could not read the controller’s current mode (\(String(format: "0x%08X", before.status))). No change was made; export diagnostics.")
+        }
+        devices[pair.key]?.inputModeBefore = priorMode
+        devices[pair.key]?.inputModeAfter = nil
+        if priorMode == 2 {
+            devices[pair.key]?.inputModeAfter = 2
+            return finish(confirmedModeMessage(id: pair.key, prefix: "The controller already reports multitouch mode (2)."))
         }
         let value = IOHIDValueCreateWithIntegerValue(kCFAllocatorDefault, element, mach_absolute_time(), 2)
         let result = IOHIDDeviceSetValue(device, element, value)
         guard result == kIOReturnSuccess else {
-            return "The controller did not accept touch mode (\(String(format: "0x%08X", result))). No vendor-specific commands were sent."
+            return finish("The controller did not accept touch mode (\(String(format: "0x%08X", result))). Export diagnostics to investigate.")
         }
-        return "Standard multitouch mode requested. Rescan devices, then check Live Touch. Reconnect the USB cable if you need to restore the controller’s default mode."
+        resetDecoder(for: selectedID)
+        let after = readFeatureInteger(device: device, element: element)
+        guard let newMode = after.value else {
+            return finish("Touch mode was requested, but the controller did not return a mode for verification. Hold two fingers on Live Touch and check the point count.")
+        }
+        devices[pair.key]?.inputModeAfter = newMode
+        if newMode == 2 {
+            return finish(confirmedModeMessage(id: pair.key, prefix: "The controller reports multitouch mode (2), previously \(priorMode)."))
+        }
+        return finish("The request was sent, but the controller still reports mode \(newMode). Export diagnostics; multitouch is not confirmed.")
+    }
+
+    private func confirmedModeMessage(id: UInt64, prefix: String) -> String {
+        guard let decoder = decoders[id] else {
+            return "\(prefix) This interface's report format is still unsupported. Export diagnostics to add a profile."
+        }
+        // A user-requested mode change is an explicit fresh validation attempt.
+        // Restart a previously rejected stream without closing the device and
+        // potentially resetting its mode. The next malformed report still latches.
+        decoders[id]?.reset()
+        frameTimers.removeValue(forKey: id)?.invalidate()
+        rejected.remove(id)
+        devices[id]?.usable = true
+        devices[id]?.error = nil
+        devices[id]?.currentContacts = 0
+        devices[id]?.support = decoder.descriptor.summary
+        return "\(prefix) Touch input restarted. Hold two fingers on Live Touch to verify; no rescan is needed."
+    }
+
+    private func readFeatureInteger(device: IOHIDDevice, element: IOHIDElement) -> (status: IOReturn, value: Int?) {
+        // The C Get API returns an unretained value via a nonoptional out pointer.
+        let storage = UnsafeMutablePointer<Unmanaged<IOHIDValue>>.allocate(capacity: 1)
+        defer { storage.deallocate() }
+        let result = IOHIDDeviceGetValue(device, element, storage)
+        guard result == kIOReturnSuccess else { return (result, nil) }
+        return (result, IOHIDValueGetIntegerValue(storage.pointee.takeUnretainedValue()))
     }
 
     private func registryID(_ device: IOHIDDevice) -> UInt64 {
@@ -146,6 +218,8 @@ final class HIDService {
             let decoder = try HIDDescriptor(data: data)
             decoders[id] = HIDReportDecoder(descriptor: decoder)
             entry.support = decoder.summary
+            entry.framing = decoder.framing.rawValue
+            entry.touchReportIDs = decoder.reportIDs
             entry.usable = true
         } catch {
             entry.support = "Touch format needs a device profile"
@@ -176,9 +250,12 @@ final class HIDService {
             let frame = try decoders[id]?.decode(report: data, timestamp: ProcessInfo.processInfo.systemUptime)
             updateFrameDeadline(id: id)
             guard let frame else { return }
+            let changedContacts = entry.currentContacts != frame.contacts.count
             devices[id]?.reports += 1
+            devices[id]?.currentContacts = frame.contacts.count
+            devices[id]?.peakContacts = max(entry.peakContacts, frame.contacts.count)
             onFrame?(entry.id, frame)
-            if Date().timeIntervalSince(lastPublish) > 0.25 { publish() }
+            if changedContacts || Date().timeIntervalSince(lastPublish) > 0.25 { publish() }
         } catch {
             reject(id: id, message: error.localizedDescription)
         }
@@ -205,6 +282,7 @@ final class HIDService {
         rejected.insert(id)
         devices[id]?.error = message
         devices[id]?.usable = false
+        devices[id]?.currentContacts = 0
         devices[id]?.support = "Input paused: unsupported or incomplete report"
         if let entry = devices[id] { onFailure?(entry.id, message) }
         publish()
@@ -212,6 +290,6 @@ final class HIDService {
 
     private func publish() {
         lastPublish = Date()
-        onDevices?(devices.values.sorted { $0.name < $1.name })
+        onDevices?(currentDevices())
     }
 }

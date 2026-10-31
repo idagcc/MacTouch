@@ -20,7 +20,7 @@ public struct TouchFrame: Equatable, Sendable {
 
 extension HIDDescriptor {
     /// Decodes one complete input report, including its ID byte when numbered.
-    /// Use HIDReportDecoder for guarded, stateful hybrid-frame assembly.
+    /// Use HIDReportDecoder to retain serial contacts or assemble hybrid frames.
     public func decode(report: Data) throws -> TouchFrame? {
         guard let packet = try inputReport(report: report) else { return nil }
         let reportedCount = try packet.contactCount
@@ -111,7 +111,7 @@ private struct HIDInputReport {
     }
 }
 
-/// Per-device, bounded assembly of standard parallel/hybrid touchscreen reports.
+/// Per-device decoding of standard serial, parallel and hybrid touch reports.
 ///
 /// The count/offset algorithm is adapted from MIT-licensed Touch-Up's
 /// StoreInputValue / DispatchTouches at commit
@@ -122,6 +122,7 @@ private struct HIDInputReport {
 public struct HIDReportDecoder: Sendable {
     public let descriptor: HIDDescriptor
     public private(set) var usesHybridFrames = false
+    public var usesSerialContacts: Bool { descriptor.framing == .serialContacts }
     public var isAssemblingFrame: Bool { pending != nil }
 
     private struct Pending: Sendable {
@@ -134,6 +135,7 @@ public struct HIDReportDecoder: Sendable {
         var contacts: [TouchContact] = []
     }
     private var pending: Pending?
+    private var serialContacts: [Int: TouchContact] = [:]
     private var lastTimestamp: TimeInterval?
     private let maximumContacts = 32
     private let frameDeadline: TimeInterval = 0.050
@@ -142,6 +144,7 @@ public struct HIDReportDecoder: Sendable {
 
     public mutating func reset() {
         pending = nil
+        serialContacts.removeAll()
         lastTimestamp = nil
         usesHybridFrames = false
     }
@@ -158,6 +161,22 @@ public struct HIDReportDecoder: Sendable {
                 throw HIDError.malformedReport("invalid or non-monotonic receive time")
             }
             lastTimestamp = timestamp
+            if usesSerialContacts {
+                // Serial HID packets are per-contact changes, not frame snapshots.
+                // Retain each stable ID until its explicit Tip/Confidence release.
+                // The host must call reset() on disconnect, mode change or watchdog
+                // timeout so an interrupted stream cannot carry contacts into a retry.
+                let entry = try packet.entries(count: 1)[0]
+                if let contact = entry.contact {
+                    guard serialContacts[entry.id] != nil || serialContacts.count < maximumContacts else {
+                        throw HIDError.unsupportedReport("serial stream exceeds the 32-contact limit")
+                    }
+                    serialContacts[entry.id] = contact
+                } else {
+                    serialContacts.removeValue(forKey: entry.id)
+                }
+                return TouchFrame(contacts: serialContacts.values.sorted { $0.id < $1.id })
+            }
             let count = try packet.contactCount
             if var frame = pending {
                 guard timestamp - frame.startedAt <= frameDeadline else {

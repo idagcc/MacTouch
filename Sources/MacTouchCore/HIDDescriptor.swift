@@ -16,6 +16,13 @@ public enum HIDError: Error, LocalizedError, Equatable {
     }
 }
 
+/// Whether each input packet describes one contact update or a complete frame.
+/// Hybrid packets are assembled separately when Contact Count exceeds packet capacity.
+public enum HIDReportFraming: String, Sendable {
+    case serialContacts
+    case completeFrames
+}
+
 /// A deliberately bounded parser for absolute touchscreen Input reports.
 /// Unknown fields still consume bits; only a Touch Screen application collection
 /// may supply contacts. Keyboard, mouse, touchpad and vendor data are never mapped.
@@ -25,7 +32,16 @@ public struct HIDDescriptor: Sendable {
     public let usesReportIDs: Bool
     public var reportIDs: [UInt8] { layouts.keys.sorted() }
     public var maximumContactsPerReport: Int { layouts.values.map { $0.contacts.count }.max() ?? 0 }
+    public var framing: HIDReportFraming {
+        guard let layout = layouts.values.first,
+              layout.count == nil, layout.contacts.count == 1,
+              layout.contacts[0].identifier != nil else { return .completeFrames }
+        // Standard serial reporting uses one Finger + Contact Identifier and no
+        // Contact Count. A new packet updates that ID; it does not release other IDs.
+        return .serialContacts
+    }
     public var summary: String {
+        if framing == .serialContacts { return "Standard HID • serial contact updates" }
         let count = maximumContactsPerReport
         return "Standard HID • \(count) contact\(count == 1 ? "" : "s") per report"
     }

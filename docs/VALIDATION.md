@@ -5,7 +5,8 @@ Checked 31 October 2026 on an Apple silicon Mac running macOS 27.0.1, using the 
 ## Completed
 
 - Native app compiles in debug and release configurations.
-- **43 XCTest cases pass:** 31 HID parsing/frame-assembly cases and 12 coordinate/gesture cases. Tests use synthetic standards-based fixtures, not captured ASUS reports.
+- **53 XCTest cases pass:** 39 HID parsing/frame-assembly cases, 12 coordinate/gesture cases and 2 end-to-end serial-contact-to-pointer cases. Tests use synthetic standards-based fixtures, not captured ASUS reports.
+- Version 0.1.1 reproduces and fixes a standard serial-protocol bug: the second finger previously replaced the first in the decoded snapshot. The regression now verifies two contacts, scrolling, independent liftoff, reset and a subsequent click. A separate preview correction immediately publishes contact-ID changes even within a 33 ms UI update interval; this UI correction was reviewed in code.
 - Universal release executable builds for `arm64` and `x86_64`. The Mach-O minimum OS is 13.0 for both architectures.
 - App bundle is ad-hoc signed and its signature is verified. It is not Developer ID signed or notarized.
 - Read-only `--diagnose` run launches, enumerates the current display, reports permission state, and exits successfully without pointer output. No external touchscreen is attached on this development Mac.
