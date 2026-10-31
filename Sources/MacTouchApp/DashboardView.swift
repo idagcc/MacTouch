@@ -68,7 +68,7 @@ struct DashboardView: View {
                 Label("Lives in your menu bar", systemImage: "menubar.rectangle").font(.system(size: 11, weight: .medium))
                 Text("Close this window and touch stays connected.").font(.system(size: 11)).foregroundStyle(.secondary).lineSpacing(3)
             }.padding(14).background(panel, in: RoundedRectangle(cornerRadius: 12))
-            Text("DEVELOPMENT PREVIEW · \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.2")").font(.system(size: 9, weight: .medium, design: .monospaced)).foregroundStyle(.tertiary).padding(.top, 10)
+            Text("DEVELOPMENT PREVIEW · \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.3")").font(.system(size: 9, weight: .medium, design: .monospaced)).foregroundStyle(.tertiary).padding(.top, 10)
         }.padding(18).frame(width: 194).background(Color.black.opacity(0.15))
     }
 
@@ -165,6 +165,9 @@ struct DashboardView: View {
                 Toggle("Flip vertically", isOn: $model.configuration.invertY)
                 Divider()
                 Toggle("Two-finger scrolling", isOn: $model.configuration.twoFingerScroll)
+                Toggle("Pinch zoom for embedded maps", isOn: $model.configuration.mapPinchZoom)
+                Text("Spread two fingers to zoom in; bring them together to zoom out. Uses Command + scroll over the map, including Google Maps in Safari. Other apps must support that input. Lift both fingers before changing between a pinch and a scroll.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 HStack {
                     Text("Scroll speed").frame(width: 100, alignment: .leading)
                     Slider(value: $model.configuration.scrollSpeed, in: 0.2...3, step: 0.1)
@@ -218,7 +221,7 @@ struct DashboardView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Built for standard USB touchscreens").font(.headline)
                 Text("This preview supports standard single-touch, serial contact updates, parallel multi-touch and split frames with matching scan times. Vendor-specific controllers and ambiguous touch formats may need an additional profile. ASUS hardware compatibility still needs a test on your monitor.")
-                Text("Touch is translated into mouse actions. Native trackpad gestures, pinch-to-zoom, pressure and pre-login control are not included.")
+                Text("Touch is translated into mouse actions. Optional map pinch zoom uses Command + scroll over the map. Native trackpad magnification, rotation, pressure and pre-login control are not included.")
                 Text("Diagnostics stay on your Mac unless you choose to share the exported file.")
             }.font(.system(size: 12)).foregroundStyle(.secondary).lineSpacing(4).padding(24).background(panel, in: RoundedRectangle(cornerRadius: 16))
         }

@@ -81,6 +81,22 @@ struct TouchTesterView: View {
             }.padding(22).background(.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 16))
 
             if !isSimulation { sensorStatus }
+            if !isSimulation {
+                HStack(spacing: 14) {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 26)).foregroundStyle(testerMint)
+                        .scaleEffect(min(1.5, max(0.6, model.gestureTestScale)))
+                        .frame(width: 52, height: 48)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(model.gestureTestText).font(.system(size: 13, weight: .semibold))
+                        Text("Detector preview · \(Int(model.gestureTestScale * 100))% · no output sent")
+                            .font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
+                        Text("To zoom the Safari map, enable Pinch zoom for embedded maps in Touch settings, then leave this tester and enable touch in Connection.")
+                            .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                }.padding(18).background(testerMint.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+            }
         }
     }
 

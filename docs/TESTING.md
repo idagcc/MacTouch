@@ -1,10 +1,10 @@
-# MacTouch 0.1.2 tester guide
+# MacTouch 0.1.3 tester guide
 
-Download [MacTouch.zip](https://github.com/idagcc/MacTouch/releases/download/v0.1.2/MacTouch.zip). This development preview targets macOS 13+ and contains both Apple silicon and Intel builds. It is a macOS app and does not run on Windows. Physical input with five simultaneous contacts was verified on a CoolTouchR System controller (USB 2575:0401); pointer/scroll operation and other monitor models remain unverified. The app is not Apple-notarized.
+Download [MacTouch.zip](https://github.com/idagcc/MacTouch/releases/download/v0.1.3/MacTouch.zip). This development preview targets macOS 13+ and contains both Apple silicon and Intel builds. It is a macOS app and does not run on Windows. Physical input with five simultaneous contacts was verified on a CoolTouchR System controller (USB 2575:0401). The user also confirmed physical pinch zoom in both directions on an embedded Google Map in Safari. General pointer/scroll operation and other monitor models remain unverified. The app is not Apple-notarized.
 
 ## Test touch points on another Mac
 
-1. Quit the old MacTouch from its menu-bar icon before replacing it in **Applications**. Open the new app and confirm the sidebar says **0.1.2**.
+1. Quit the old MacTouch from its menu-bar icon before replacing it in **Applications**. Open the new app and confirm the sidebar says **0.1.3**.
 2. Connect the sensor's USB cable, open **Touch tester → Sensor**, and choose its controller. The sensor's video cable is not needed to show its surface on your Mac's display.
 3. Enable MacTouch under **Privacy & Security → Input Monitoring**, then quit/reopen MacTouch. Accessibility is only needed later for cursor control.
 4. If Input Monitoring already appears on but no sensor frames arrive after updating, remove the old MacTouch entry with **−**, add the current app from Applications with **+**, and choose **Quit & Reopen**. This refresh was necessary for the locally rebuilt ad-hoc signed app.
@@ -28,13 +28,14 @@ Closing the window keeps MacTouch running. Its menu-bar icon provides **Pause to
 
 ## What to check
 
+- Enable **Touch settings → Pinch zoom for embedded maps** to test Google Maps in Safari. First use **Touch tester → Sensor** to inspect the pinch detector and changing detector percentage while your fingers move; no output is sent from this page. Return to **Connection**, grant pointer control, enable touch, then touch and lift once to arm it. Bring Safari forward and pinch with the mapped midpoint over the actual map. Spreading should zoom the map in; bringing fingers together should zoom it out. Lift both before changing between pinch and scroll. The host page and Safari toolbar should keep the same scale.
 - One finger clicks and drags on the chosen display, with no unexpected clicks on another display.
 - Two fingers scroll, including slow movement. Adding a second finger ends an existing drag; lift all fingers before starting a new click.
 - Unplugging USB during a drag releases the mouse button. Reconnecting, sleep/wake and display disconnects recover without a stuck drag.
 - Closing the window preserves touch input. Enabling/disabling login startup produces the expected result after the next sign-in.
 - A long stationary hold may be cancelled after ten seconds without reports. That is the current safety timeout.
 
-Do not expect pinch/rotate, right-click, stylus pressure or login-screen/FileVault control in this version.
+Map pinches translate into Command + scroll; they do not synthesize native trackpad magnification. Apps and maps must handle that input. Rotation, right-click, stylus pressure and login-screen/FileVault control are not included.
 
 ## Report results
 

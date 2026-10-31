@@ -8,10 +8,12 @@ final class PointerOutput {
     private var lastPoint = CGPoint.zero
     private var clickCount: Int64 = 1
     private var scrollRemainder = CGPoint.zero
+    private var zoomRemainder = 0.0
 
     func send(_ actions: [PointerAction]) {
         for action in actions {
             if case .scroll = action {} else { scrollRemainder = .zero }
+            if case .mapZoom = action {} else { zoomRemainder = 0 }
             switch action {
             case let .move(x, y): mouse(.mouseMoved, x, y)
             case let .down(x, y):
@@ -33,11 +35,26 @@ final class PointerOutput {
                 let event = CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 2,
                                     wheel1: Int32(vertical), wheel2: Int32(horizontal), wheel3: 0)
                 event?.post(tap: .cghidEventTap)
+            case let .mapZoom(x, y, delta):
+                guard x.isFinite, y.isFinite, delta.isFinite else { continue }
+                zoomRemainder += min(120, max(-120, delta))
+                let vertical = zoomRemainder.rounded(.towardZero)
+                zoomRemainder -= vertical
+                guard vertical != 0 else { continue }
+                // The location must be over the embedded map, not Safari's
+                // toolbar. Flags apply only to this wheel event; no modifier
+                // key is pressed or left held after cancellation.
+                mouse(.mouseMoved, x, y)
+                let event = CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 1,
+                                    wheel1: Int32(vertical), wheel2: 0, wheel3: 0)
+                event?.location = CGPoint(x: x, y: y)
+                event?.flags = .maskCommand
+                event?.post(tap: .cghidEventTap)
             }
         }
     }
 
-    func resetScroll() { scrollRemainder = .zero }
+    func resetScroll() { scrollRemainder = .zero; zoomRemainder = 0 }
 
     private func mouse(_ type: CGEventType, _ x: Double, _ y: Double) {
         guard x.isFinite, y.isFinite else { return }

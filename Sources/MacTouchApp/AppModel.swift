@@ -36,8 +36,10 @@ final class AppModel: ObservableObject {
     @Published var waitingForLift = true
     @Published var suspended = false
     @Published var lastTouch = "No touch received yet"
-    @Published var touchTesterActive = false { didSet { resetInput() } }
+    @Published var touchTesterActive = false { didSet { resetInput(); resetGestureTest() } }
     @Published private(set) var touchTest = TouchTestSession()
+    @Published private(set) var gestureTestText = "Place two fingers to test pinch or scroll"
+    @Published private(set) var gestureTestScale = 1.0
     let hid = HIDService()
     private let defaults = UserDefaults.standard
     private let output = PointerOutput()
@@ -50,6 +52,9 @@ final class AppModel: ObservableObject {
     private var lastUIUpdate = 0.0
     private var receivedFrames = 0
     private var touchTestSession = TouchTestSession()
+    private var gestureTestEngine = PointerEngine()
+    private var pendingGestureText = "Place two fingers to test pinch or scroll"
+    private var pendingGestureScale = 1.0
     private var wasAllowed = false
     private var hasActiveInput = false
     private var suspensionReasons: Set<String> = []
@@ -137,6 +142,41 @@ final class AppModel: ObservableObject {
         // Held fingers remain visible; a reset does not imply a physical liftoff.
         if !contacts.isEmpty { touchTestSession.record(TouchFrame(contacts: contacts)) }
         touchTest = touchTestSession
+        resetGestureTest()
+    }
+
+    private func resetGestureTest() {
+        _ = gestureTestEngine.cancel()
+        pendingGestureText = "Place two fingers to test pinch or scroll"
+        pendingGestureScale = 1
+        gestureTestText = pendingGestureText; gestureTestScale = 1
+    }
+
+    private func recordGestureTest(_ frame: TouchFrame, timestamp: TimeInterval) {
+        guard touchTesterActive else { return }
+        var testConfiguration = configuration
+        testConfiguration.mapPinchZoom = true
+        testConfiguration.twoFingerScroll = true
+        let previousIntent = gestureTestEngine.twoFingerIntent
+        // Only inspect the resulting actions; this preview never sends them.
+        let actions = gestureTestEngine.process(frame: frame,
+            bounds: selectedDisplay?.bounds ?? CGRect(x: 0, y: 0, width: 1001, height: 1001),
+            configuration: testConfiguration, timestamp: timestamp)
+        if previousIntent == nil && frame.contacts.count == 2 { pendingGestureScale = 1 }
+        for action in actions {
+            if case .mapZoom(_, _, let delta) = action {
+                pendingGestureScale = min(8, max(0.125, pendingGestureScale * exp(delta / 400)))
+            }
+        }
+        switch gestureTestEngine.twoFingerIntent {
+        case .pinching: pendingGestureText = "Pinch detected"
+        case .scrolling: pendingGestureText = "Two-finger scroll detected"
+        case .deciding: pendingGestureText = "Move apart to pinch, or slide together to scroll"
+        case nil:
+            if frame.contacts.isEmpty { pendingGestureText = "All fingers lifted" }
+            else if frame.contacts.count == 1 { pendingGestureText = "Add a second finger to test a pinch" }
+            else { pendingGestureText = "Lift all fingers, then use exactly two" }
+        }
     }
 
     func requestMultitouchMode() {
@@ -207,12 +247,14 @@ final class AppModel: ObservableObject {
         let now = ProcessInfo.processInfo.systemUptime
         lastFrameTime = now; receivedFrames += 1
         touchTestSession.record(frame)
+        recordGestureTest(frame, timestamp: now)
         // A second finger may arrive within the same UI tick and then stay still.
         // Never throttle contact membership changes; throttle only position updates.
         let changedIDs = Set(contacts.map(\.id)) != Set(frame.contacts.map(\.id))
         if changedIDs || now - lastUIUpdate > 1.0 / 30.0 || frame.contacts.isEmpty {
             contacts = frame.contacts; frameCount = receivedFrames
             touchTest = touchTestSession
+            gestureTestText = pendingGestureText; gestureTestScale = pendingGestureScale
             lastTouch = frame.contacts.isEmpty ? "All fingers lifted" : "\(frame.contacts.count) contact\(frame.contacts.count == 1 ? "" : "s") received"
             lastUIUpdate = now
         }
@@ -221,7 +263,8 @@ final class AppModel: ObservableObject {
             if frame.contacts.isEmpty { waitingForLift = false }
             return
         }
-        output.send(engine.process(frame: frame, bounds: display.bounds, configuration: configuration))
+        if frame.contacts.isEmpty { output.resetScroll() }
+        output.send(engine.process(frame: frame, bounds: display.bounds, configuration: configuration, timestamp: now))
         hasActiveInput = !frame.contacts.isEmpty
     }
 
@@ -235,6 +278,7 @@ final class AppModel: ObservableObject {
             contacts = []
             touchTestSession.clearContacts()
             touchTest = touchTestSession
+            resetGestureTest()
         }
     }
 
@@ -274,7 +318,7 @@ final class AppModel: ObservableObject {
 
     func diagnosticsData() throws -> Data {
         let payload: [String: Any] = [
-            "appVersion": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.2", "macOS": ProcessInfo.processInfo.operatingSystemVersionString,
+            "appVersion": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.3", "macOS": ProcessInfo.processInfo.operatingSystemVersionString,
             "accessibility": accessibilityAllowed, "inputMonitoring": inputAllowed,
             "serviceStatus": serviceStatus, "selectedDevice": selectedDeviceID,
             "selectedDisplay": selectedDisplayID, "enabled": enabled,

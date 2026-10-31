@@ -91,6 +91,31 @@ final class TouchPipelineTests: XCTestCase {
         XCTAssertEqual(engine.process(frame: oldLift, bounds: bounds), [])
     }
 
+    func testSerialContactSeparationReachesMapZoomWithoutScrolling() throws {
+        var decoder = HIDReportDecoder(descriptor: try HIDDescriptor(data: serialDescriptor))
+        var engine = PointerEngine()
+        let config = PointerConfiguration(mapPinchZoom: true)
+        let packets: [(Data, TimeInterval)] = [
+            (report(id: 4, x: 400, y: 800), 1),
+            (report(id: 9, x: 800, y: 800), 1.001),
+            (report(id: 4, x: 350, y: 800), 1.01),
+            (report(id: 9, x: 850, y: 800), 1.02)
+        ]
+        var outputs: [[PointerAction]] = []
+        for (packet, timestamp) in packets {
+            let decoded = try XCTUnwrap(decoder.decode(report: packet, timestamp: timestamp))
+            outputs.append(engine.process(frame: decoded, bounds: bounds, configuration: config, timestamp: timestamp))
+        }
+        assertActions(outputs[1], [.up(x: 400, y: 800), .move(x: 600, y: 800)])
+        XCTAssertEqual(outputs[2], [], "Wait for the other serial contact before deciding between pinch and scroll.")
+        guard outputs[3].count == 1, case let .mapZoom(x, y, delta) = outputs[3][0] else {
+            return XCTFail("Expected embedded-map zoom, received \(outputs[3])")
+        }
+        XCTAssertEqual(x, 600, accuracy: 0.001)
+        XCTAssertEqual(y, 800, accuracy: 0.001)
+        XCTAssertGreaterThan(delta, 0)
+    }
+
     private func assertActions(_ actual: [PointerAction], _ expected: [PointerAction],
                                file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertEqual(actual.count, expected.count, file: file, line: line)

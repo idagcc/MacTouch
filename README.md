@@ -4,11 +4,13 @@ A native macOS menu-bar app that translates compatible external touchscreen inpu
 
 This is a working development preview, not a universal replacement for UPDD. It contains real HID discovery, report decoding and Quartz output; the empty device list on a Mac without a touchscreen is intentional.
 
-**Test build:** [Download MacTouch v0.1.2 for Apple silicon and Intel](https://github.com/idagcc/MacTouch/releases/download/v0.1.2/MacTouch.zip). See the [release notes](https://github.com/idagcc/MacTouch/releases/tag/v0.1.2) and [tester guide](docs/TESTING.md) before testing.
+**Test build:** [Download MacTouch v0.1.3 for Apple silicon and Intel](https://github.com/idagcc/MacTouch/releases/download/v0.1.3/MacTouch.zip). See the [release notes](https://github.com/idagcc/MacTouch/releases/tag/v0.1.3) and [tester guide](docs/TESTING.md) before testing.
 
-Version 0.1.1 fixed serial touchscreen reports replacing one held finger with another, and a preview refresh bug that could hide a rapidly added second finger. Those fixes are included in 0.1.2.
+Version 0.1.1 fixed serial touchscreen reports replacing one held finger with another, and a preview refresh bug that could hide a rapidly added second finger. Those fixes remain included.
 
 Version **0.1.2** adds a touch tester and mouse-driven simulator. A user-assisted test on the connected **CoolTouchR System (2575:0401)** received real sensor reports with **five simultaneous contacts**, after enabling Input Monitoring and requesting standard multitouch mode (0 → 2). This verifies multi-contact reception on that controller; full pointer/scroll behavior and the exact monitor model remain unverified. See the [hardware session notes](docs/VALIDATION.md).
+
+Version **0.1.3** adds opt-in **pinch zoom for embedded maps**. With that setting enabled, the user confirmed that a physical pinch zoomed the actual Google Maps iframe in Safari in both directions. It uses Command + scroll over the mapped pinch midpoint; it does not synthesize native trackpad magnification.
 
 ## Try the app
 
@@ -30,6 +32,7 @@ When updating an ad-hoc signed build, Input Monitoring may appear enabled while 
 
 ## Implemented
 
+- **Embedded-map pinch zoom:** opt in with **Touch settings → Pinch zoom for embedded maps**. Finger separation becomes Command-modified pixel-wheel input at the mapped midpoint, using Google Maps' [documented zoom input](https://developers.google.com/maps/documentation/javascript/interaction). Moving fingers together remains scrolling; lift both before changing gesture. This is map input translation, not native trackpad magnification or Safari page zoom. The Sensor tester includes a pinch/scroll detector preview without sending output.
 - **Touch tester:** a large contact map with numbered, color-coded fingers, coordinates, current/peak counts, and two-/three-finger milestones. Open **Touch tester → Sensor** to measure the selected USB controller without controlling the pointer. Only Input Monitoring is needed for this view; its video cable and Accessibility permission are not required. **Simulation** lets you create 1, 2, 3, 5 or 10 points and drag them with your mouse without permissions. Simulation stays separate from sensor measurements and diagnostics. Reset peak starts new measurements for the selected controller.
 - Native SwiftUI setup window and menu-bar controls; no Dock icon required.
 - macOS 13+ login startup through `SMAppService.mainApp`.
@@ -46,7 +49,7 @@ When updating an ad-hoc signed build, Input Monitoring may appear enabled while 
 
 - Full ASUS multi-touch compatibility remains unverified. A valid descriptor does not prove end-to-end compatibility. Export diagnostics from the target Mac for the next hardware-support pass.
 - Proprietary/non-HID USB controllers, devices requiring vendor activation, ambiguous hybrid/serial layouts and mouse-emulation-only touch interfaces need dedicated profiles.
-- Mouse and scroll translation is not native system-wide multitouch. Pinch/rotate, pressure, stylus handling, right-click and application-specific touch APIs are not implemented.
+- Mouse and scroll translation is not native system-wide multitouch. Optional map pinch zoom requires a map that handles Command + scroll at the pointer location; native trackpad magnification, rotation, pressure, stylus handling, right-click and application-specific touch APIs are not implemented.
 - Immediate mouse-down makes dragging responsive; adding a second finger releases that button before scrolling. It can trigger an initial primary click if the second finger arrives later.
 - A ten-second gap in reports with active contacts releases input, clears cached serial contacts and requires a full lift. This also clears stale Live Touch state while pointer control is paused. A controller that reports only changes can therefore have a legitimate long stationary hold cancelled.
 - Login startup occurs after user sign-in. It does not enable FileVault/login-screen touch and does not guarantee restart after a crash. Login registration is implemented but a real logout/login cycle is not automated by the development tests.

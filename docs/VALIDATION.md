@@ -5,7 +5,7 @@ Checked 31 October 2026 on an Apple silicon Mac running macOS 27.0.1, using the 
 ## Completed
 
 - Native app compiles in debug and release configurations.
-- **56 XCTest cases pass:** 39 HID parsing/frame-assembly cases, 12 coordinate/gesture cases, 2 end-to-end serial-contact-to-pointer cases and 3 touch-test measurement cases. The measurement cases check a brief three-contact frame followed by liftoff, disconnect without inventing a received frame, and reset. Tests use synthetic standards-based fixtures, not captured ASUS reports.
+- **69 XCTest cases pass:** 39 HID parsing/frame-assembly cases, 12 coordinate/gesture cases, 3 end-to-end serial-contact-to-pointer cases, 3 touch-test measurement cases and 12 map-pinch cases. The pinch cases cover opposite zoom directions, midpoint routing, scroll discrimination, serial-report grace, anchored fingers, jitter, liftoff, cancellation, ID replacement, third contacts, mapping/configuration changes, invalid time, jump rejection, scroll-speed isolation and old saved-profile decoding. Tests use synthetic standards-based fixtures, not captured ASUS reports.
 - Version 0.1.1 reproduces and fixes a standard serial-protocol bug: the second finger previously replaced the first in the decoded snapshot. The regression now verifies two contacts, scrolling, independent liftoff, reset and a subsequent click. A separate preview correction immediately publishes contact-ID changes even within a 33 ms UI update interval; this UI correction was reviewed in code.
 - Universal release executable builds for `arm64` and `x86_64`. The Mach-O minimum OS is 13.0 for both architectures.
 - App bundle is ad-hoc signed and its signature is verified. It is not Developer ID signed or notarized.
@@ -24,6 +24,15 @@ Checked 31 October 2026 on an Apple silicon Mac running macOS 27.0.1, using the 
 - The sensor's video cable was disconnected. Its normalized touch surface was visible on the laptop's built-in display. Accessibility was still unapproved, and pointer output remained disabled; actual mouse injection, mapping accuracy and two-finger scrolling were not tested in this session.
 - The exact monitor model remains unidentified. Reconnect defaults, mode persistence, sleep/wake and other controllers remain unverified.
 
+## Local 0.1.3 map-pinch session — 31 October 2026
+
+- Added opt-in **Pinch zoom for embedded maps** and a detector preview. Separation becomes Command-modified pixel-wheel input at the mapped midpoint using public Quartz APIs. Modifier flags apply to individual wheel events; the app does not hold a Command key down. This is not native trackpad magnification.
+- Both architectures compile, and all 69 automated tests pass. Existing saved profiles retain their mapping and scroll settings, with map pinch off until enabled.
+- The connected sensor returned to Device Mode **0** after USB reconnection. The standard request restored and verified **2**. Input Monitoring and pointer-control permissions were refreshed with the user's approval for the new ad-hoc signed build.
+- The user enabled map pinch, left the tester, enabled pointer control, and confirmed that spreading and bringing fingers together zoomed their **actual embedded Google Map in Safari in both directions**. The app was observed in Connection with both permissions allowed, touch enabled, and a physical peak of five contacts. This is user-assisted end-to-end evidence on the connected controller, rather than a claim derived from synthetic tests.
+- A closed tester window was reopened; the app process remained running and no MacTouch crash report was found. One interrupted attempt coincided with the USB device disappearing from macOS. Reconnecting and requesting mode 2 restored reception.
+- General scrolling, other applications, native magnification, long-duration behavior and automatic mode restoration remain outside this validation.
+
 ## Required before claiming full ASUS compatibility
 
 1. Record the exact ASUS model, USB vendor/product IDs, interface identities and report descriptor using **Export diagnostics** on the target Mac mini.
@@ -34,4 +43,4 @@ Checked 31 October 2026 on an Apple silicon Mac running macOS 27.0.1, using the 
 6. Install the final signed app in Applications, enable launch at login, sign out/in and verify quiet background startup. Check disabled startup, deliberate Quit and uninstall independently.
 7. Test the signed/notarized build on a clean supported Mac. Measure latency, idle CPU and memory before setting performance claims.
 
-Accessibility approval, actual mouse injection, logout/login and notarization were **not** exercised. Standard Device Mode writes and physical multi-contact reception were verified in the user-assisted session above. The login feature is implemented using Service Management; the current main-app registration does not provide crash supervision or pre-login input.
+Pointer-control permission and embedded-map zoom output were exercised in the 0.1.3 user-assisted session. A general click/drag/scroll acceptance pass, logout/login and notarization remain pending. Standard Device Mode writes and physical multi-contact reception were also verified. The login feature is implemented using Service Management; the current main-app registration does not provide crash supervision or pre-login input.
