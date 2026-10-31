@@ -71,7 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             value.titlebarAppearsTransparent = true
             value.isReleasedWhenClosed = false
             value.minSize = NSSize(width: 920, height: 680)
-            value.contentView = NSHostingView(rootView: DashboardView(model: model))
+            value.contentView = NSHostingView(rootView: DashboardView(model: model, showTester: CommandLine.arguments.contains("--tester")))
             value.center(); window = value
         }
         NSApp.activate(ignoringOtherApps: true)
@@ -85,8 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         // A closed tester must not leave a background kiosk bridge paused.
         // Reopening starts on Connection rather than a hidden tester page.
         model.touchTesterActive = false
-        window?.contentView = nil
-        window = nil
+        window?.contentView = NSHostingView(rootView: DashboardView(model: model))
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showWindow(); return true }

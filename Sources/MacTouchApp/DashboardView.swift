@@ -13,7 +13,12 @@ private enum Section: String, CaseIterable {
 
 struct DashboardView: View {
     @ObservedObject var model: AppModel
-    @State private var section: Section = CommandLine.arguments.contains("--tester") ? .tester : .connection
+    @State private var section: Section
+
+    init(model: AppModel, showTester: Bool = false) {
+        self.model = model
+        _section = State(initialValue: showTester ? .tester : .connection)
+    }
 
     var body: some View {
         HStack(spacing: 0) {
