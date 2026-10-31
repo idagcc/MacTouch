@@ -5,15 +5,15 @@ private let accent = Color(red: 0.43, green: 0.88, blue: 0.71)
 private let panel = Color.white.opacity(0.045)
 
 private enum Section: String, CaseIterable {
-    case connection = "Connection", settings = "Touch settings", diagnostics = "Diagnostics"
+    case connection = "Connection", tester = "Touch tester", settings = "Touch settings", diagnostics = "Diagnostics"
     var symbol: String {
-        switch self { case .connection: return "display"; case .settings: return "slider.horizontal.3"; case .diagnostics: return "waveform.path.ecg" }
+        switch self { case .connection: return "display"; case .tester: return "hand.draw"; case .settings: return "slider.horizontal.3"; case .diagnostics: return "waveform.path.ecg" }
     }
 }
 
 struct DashboardView: View {
     @ObservedObject var model: AppModel
-    @State private var section = Section.connection
+    @State private var section: Section = CommandLine.arguments.contains("--tester") ? .tester : .connection
 
     var body: some View {
         HStack(spacing: 0) {
@@ -32,6 +32,7 @@ struct DashboardView: View {
                     }
                     switch section {
                     case .connection: connection
+                    case .tester: TouchTesterView(model: model)
                     case .settings: touchSettings
                     case .diagnostics: diagnostics
                     }
@@ -42,6 +43,8 @@ struct DashboardView: View {
         .background(Color(red: 0.075, green: 0.087, blue: 0.096))
         .preferredColorScheme(.dark)
         .tint(accent)
+        .onAppear { model.touchTesterActive = section == .tester }
+        .onChange(of: section) { model.touchTesterActive = $0 == .tester }
     }
 
     private var sidebar: some View {
@@ -65,7 +68,7 @@ struct DashboardView: View {
                 Label("Lives in your menu bar", systemImage: "menubar.rectangle").font(.system(size: 11, weight: .medium))
                 Text("Close this window and touch stays connected.").font(.system(size: 11)).foregroundStyle(.secondary).lineSpacing(3)
             }.padding(14).background(panel, in: RoundedRectangle(cornerRadius: 12))
-            Text("DEVELOPMENT PREVIEW · 0.1.1").font(.system(size: 9, weight: .medium, design: .monospaced)).foregroundStyle(.tertiary).padding(.top, 10)
+            Text("DEVELOPMENT PREVIEW · \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.2")").font(.system(size: 9, weight: .medium, design: .monospaced)).foregroundStyle(.tertiary).padding(.top, 10)
         }.padding(18).frame(width: 194).background(Color.black.opacity(0.15))
     }
 
@@ -79,16 +82,16 @@ struct DashboardView: View {
             Spacer()
             HStack(spacing: 6) {
                 Circle().fill(model.isRunning ? accent : .orange).frame(width: 6, height: 6)
-                Text(model.isRunning ? "CONNECTED" : "SETUP").font(.system(size: 9, weight: .semibold)).tracking(1)
+                Text(section == .tester ? "POINTER PAUSED" : (model.isRunning ? "CONNECTED" : "SETUP")).font(.system(size: 9, weight: .semibold)).tracking(1)
             }.padding(.horizontal, 11).padding(.vertical, 8).background(panel, in: Capsule())
         }
     }
 
     private var title: String {
-        switch section { case .connection: return "Bring your screen to life."; case .settings: return "Make touch feel right."; case .diagnostics: return "See what’s connected." }
+        switch section { case .connection: return "Bring your screen to life."; case .tester: return "See every finger."; case .settings: return "Make touch feel right."; case .diagnostics: return "See what’s connected." }
     }
     private var subtitle: String {
-        switch section { case .connection: return "Connect your USB touchscreen, then choose where it points."; case .settings: return "Tune the selected controller and keep MacTouch ready at login."; case .diagnostics: return "Check the input path and export a report for device support." }
+        switch section { case .connection: return "Connect your USB touchscreen, then choose where it points."; case .tester: return "Count real sensor contacts, or try the simulator with your mouse."; case .settings: return "Tune the selected controller and keep MacTouch ready at login."; case .diagnostics: return "Check the input path and export a report for device support." }
     }
 
     private var connection: some View {

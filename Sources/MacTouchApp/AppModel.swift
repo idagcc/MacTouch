@@ -20,7 +20,7 @@ final class AppModel: ObservableObject {
     @Published var devices: [TouchDevice] = []
     @Published var displays: [ConnectedDisplay] = []
     @Published var selectedDeviceID: String {
-        didSet { resetInput(resetTouchState: true); defaults.set(selectedDeviceID, forKey: "selectedDevice"); loadProfile() }
+        didSet { resetInput(resetTouchState: true); resetTouchTest(); defaults.set(selectedDeviceID, forKey: "selectedDevice"); loadProfile() }
     }
     @Published var selectedDisplayID = "" { didSet { resetInput(); saveProfile() } }
     @Published var configuration = PointerConfiguration() { didSet { resetInput(); saveProfile() } }
@@ -36,6 +36,8 @@ final class AppModel: ObservableObject {
     @Published var waitingForLift = true
     @Published var suspended = false
     @Published var lastTouch = "No touch received yet"
+    @Published var touchTesterActive = false { didSet { resetInput() } }
+    @Published private(set) var touchTest = TouchTestSession()
     let hid = HIDService()
     private let defaults = UserDefaults.standard
     private let output = PointerOutput()
@@ -47,6 +49,7 @@ final class AppModel: ObservableObject {
     private var lastFrameTime = ProcessInfo.processInfo.systemUptime
     private var lastUIUpdate = 0.0
     private var receivedFrames = 0
+    private var touchTestSession = TouchTestSession()
     private var wasAllowed = false
     private var hasActiveInput = false
     private var suspensionReasons: Set<String> = []
@@ -61,12 +64,12 @@ final class AppModel: ObservableObject {
         hid.onFrame = { [weak self] in self?.receive(id: $0, frame: $1) }
         hid.onFailure = { [weak self] id, error in
             guard let self, id == self.selectedDeviceID else { return }
-            self.resetInput(); self.contacts = []
+            self.resetInput(resetTouchState: true)
             self.notice = "Touch input stopped: \(error) Export diagnostics to add support for this controller."
         }
         hid.onRemoved = { [weak self] id in
             guard let self, id == self.selectedDeviceID else { return }
-            self.resetInput(); self.contacts = []
+            self.resetInput(resetTouchState: true)
         }
         hid.onIdentityInvalidated = { [weak self] id in
             guard let self, id == self.selectedDeviceID else { return }
@@ -78,11 +81,13 @@ final class AppModel: ObservableObject {
 
     var selectedDevice: TouchDevice? { devices.first { $0.id == selectedDeviceID } }
     var selectedDisplay: ConnectedDisplay? { displays.first { $0.id == selectedDisplayID } }
-    var canBridge: Bool { selectedDevice?.usable == true && selectedDisplay != nil && accessibilityAllowed && !suspended }
+    var canBridge: Bool { selectedDevice?.usable == true && selectedDisplay != nil && accessibilityAllowed && !suspended && !touchTesterActive }
     var headline: String {
         if suspended { return "Paused while your Mac is asleep" }
+        if touchTesterActive { return "Touch tester · pointer control paused" }
         if devices.isEmpty { return "Connect your touchscreen" }
         if selectedDevice == nil { return "Choose a touch controller" }
+        if !inputAllowed { return "Allow Input Monitoring to read touches" }
         if selectedDevice?.usable == false { return "This controller needs a profile" }
         if selectedDisplay == nil { return "Choose the touchscreen display" }
         if !accessibilityAllowed { return "Allow pointer control" }
@@ -127,9 +132,16 @@ final class AppModel: ObservableObject {
 
     func rescan() { notice = nil; resetInput(); refreshPermissions(); refreshDisplays(); hid.rescan() }
 
+    func resetTouchTest() {
+        touchTestSession.reset()
+        // Held fingers remain visible; a reset does not imply a physical liftoff.
+        if !contacts.isEmpty { touchTestSession.record(TouchFrame(contacts: contacts)) }
+        touchTest = touchTestSession
+    }
+
     func requestMultitouchMode() {
         enabled = false
-        contacts = []
+        resetInput(resetTouchState: true)
         notice = hid.requestMultitouchMode(for: selectedDeviceID)
     }
 
@@ -194,11 +206,13 @@ final class AppModel: ObservableObject {
         guard !suspended else { hid.resetDecoder(for: id); return }
         let now = ProcessInfo.processInfo.systemUptime
         lastFrameTime = now; receivedFrames += 1
+        touchTestSession.record(frame)
         // A second finger may arrive within the same UI tick and then stay still.
         // Never throttle contact membership changes; throttle only position updates.
         let changedIDs = Set(contacts.map(\.id)) != Set(frame.contacts.map(\.id))
         if changedIDs || now - lastUIUpdate > 1.0 / 30.0 || frame.contacts.isEmpty {
             contacts = frame.contacts; frameCount = receivedFrames
+            touchTest = touchTestSession
             lastTouch = frame.contacts.isEmpty ? "All fingers lifted" : "\(frame.contacts.count) contact\(frame.contacts.count == 1 ? "" : "s") received"
             lastUIUpdate = now
         }
@@ -219,6 +233,8 @@ final class AppModel: ObservableObject {
         if resetTouchState {
             hid.resetDecoder(for: selectedDeviceID)
             contacts = []
+            touchTestSession.clearContacts()
+            touchTest = touchTestSession
         }
     }
 
@@ -258,10 +274,11 @@ final class AppModel: ObservableObject {
 
     func diagnosticsData() throws -> Data {
         let payload: [String: Any] = [
-            "appVersion": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.1", "macOS": ProcessInfo.processInfo.operatingSystemVersionString,
+            "appVersion": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.2", "macOS": ProcessInfo.processInfo.operatingSystemVersionString,
             "accessibility": accessibilityAllowed, "inputMonitoring": inputAllowed,
             "serviceStatus": serviceStatus, "selectedDevice": selectedDeviceID,
             "selectedDisplay": selectedDisplayID, "enabled": enabled,
+            "touchTest": ["currentContacts": touchTest.currentContacts, "peakContacts": touchTest.peakContacts, "frames": touchTest.frames],
             "devices": hid.currentDevices().map { device -> [String: Any] in [
                 "id": device.id, "name": device.name, "vendorID": device.vendorID, "productID": device.productID,
                 "transport": device.transport, "support": device.support, "usable": device.usable,

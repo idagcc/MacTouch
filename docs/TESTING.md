@@ -1,12 +1,18 @@
-# MacTouch 0.1.1 tester guide
+# MacTouch 0.1.2 tester guide
 
-Download [MacTouch.zip](https://github.com/idagcc/MacTouch/releases/download/v0.1.1/MacTouch.zip). This development preview targets macOS 13+ and contains both Apple silicon and Intel builds. Full multi-touch operation has not yet been verified on the intended ASUS monitor, and the app is not Apple-notarized.
+Download [MacTouch.zip](https://github.com/idagcc/MacTouch/releases/download/v0.1.2/MacTouch.zip). This development preview targets macOS 13+ and contains both Apple silicon and Intel builds. It is a macOS app and does not run on Windows. Physical input with five simultaneous contacts was verified on a CoolTouchR System controller (USB 2575:0401); pointer/scroll operation and other monitor models remain unverified. The app is not Apple-notarized.
 
-## Retesting the one-point issue
+## Test touch points on another Mac
 
-Quit the old MacTouch from its menu-bar icon before replacing it in Applications. Open the new app and confirm the sidebar says **0.1.1**. Keep pointer control off, hold two fingers down, then move either finger: Live Touch should show two points, and its peak count should reach at least 2. Lift fingers individually and confirm the counts change from 2 to 1 to 0.
+1. Quit the old MacTouch from its menu-bar icon before replacing it in **Applications**. Open the new app and confirm the sidebar says **0.1.2**.
+2. Connect the sensor's USB cable, open **Touch tester → Sensor**, and choose its controller. The sensor's video cable is not needed to show its surface on your Mac's display.
+3. Enable MacTouch under **Privacy & Security → Input Monitoring**, then quit/reopen MacTouch. Accessibility is only needed later for cursor control.
+4. If Input Monitoring already appears on but no sensor frames arrive after updating, remove the old MacTouch entry with **−**, add the current app from Applications with **+**, and choose **Quit & Reopen**. This refresh was necessary for the locally rebuilt ad-hoc signed app.
+5. If touch only moves the cursor, no dots appear, or only one finger is reported, use **Request multitouch mode** in the tester or **Diagnostics**. On the tested CoolTouchR controller, mode **0 → 2** enabled separate contacts. Do not rescan after a confirmed mode change.
+6. Hold one finger down, add a second and then a third, and move each. The numbered points should remain separate. Lift them individually and verify **3 → 2 → 1 → 0**. **Most together** should remain at least 3. **Reset peak** starts a fresh measurement, retaining any currently held fingers.
+7. Use **Simulation** to try 1, 2, 3, 5 or 10 mouse-generated points, drag points independently, and use **Lift all**. This requires no sensor or permissions and does not count toward the sensor's measured peak.
 
-If only one point appears, use **Diagnostics → Request multitouch mode** and read the returned status. There is no need to rescan afterward. Test two fingers again. If it still shows one, export diagnostics and share the controller name, USB ID and exact ASUS model with the maintainer. The report now includes framing, observed contact counts and mode readback to distinguish a decoder issue from device configuration.
+Pointer control pauses while **Touch tester** is selected. Return to **Connection** before testing clicks or scrolling. A mode-2 readback alone does not prove physical multitouch; the sensor's measured peak is the relevant evidence. If it still shows one point or zero frames, export diagnostics and share the controller name, USB ID and exact monitor model. USB reconnects may restore the default controller mode; request multitouch mode again if needed.
 
 ## Install and connect
 

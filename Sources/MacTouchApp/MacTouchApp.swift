@@ -41,7 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         mainMenu.addItem(applicationItem)
         NSApp.mainMenu = mainMenu
         model.start()
-        if !UserDefaults.standard.bool(forKey: "hasOpened") || CommandLine.arguments.contains("--show") {
+        if !UserDefaults.standard.bool(forKey: "hasOpened") || CommandLine.arguments.contains("--show") || CommandLine.arguments.contains("--tester") {
             showWindow()
             UserDefaults.standard.set(true, forKey: "hasOpened")
         }

@@ -4,9 +4,11 @@ A native macOS menu-bar app that translates compatible external touchscreen inpu
 
 This is a working development preview, not a universal replacement for UPDD. It contains real HID discovery, report decoding and Quartz output; the empty device list on a Mac without a touchscreen is intentional.
 
-**Test build:** [Download MacTouch v0.1.1 for Apple silicon and Intel](https://github.com/idagcc/MacTouch/releases/download/v0.1.1/MacTouch.zip). See the [release notes](https://github.com/idagcc/MacTouch/releases/tag/v0.1.1) and [tester guide](docs/TESTING.md) before testing.
+**Test build:** [Download MacTouch v0.1.2 for Apple silicon and Intel](https://github.com/idagcc/MacTouch/releases/download/v0.1.2/MacTouch.zip). See the [release notes](https://github.com/idagcc/MacTouch/releases/tag/v0.1.2) and [tester guide](docs/TESTING.md) before testing.
 
-Version 0.1.1 fixes serial touchscreen reports replacing one held finger with another, and a preview refresh bug that could hide a rapidly added second finger. These bugs are reproduced and fixed in software; the actual ASUS controller still needs confirmation on hardware.
+Version 0.1.1 fixed serial touchscreen reports replacing one held finger with another, and a preview refresh bug that could hide a rapidly added second finger. Those fixes are included in 0.1.2.
+
+Version **0.1.2** adds a touch tester and mouse-driven simulator. A user-assisted test on the connected **CoolTouchR System (2575:0401)** received real sensor reports with **five simultaneous contacts**, after enabling Input Monitoring and requesting standard multitouch mode (0 → 2). This verifies multi-contact reception on that controller; full pointer/scroll behavior and the exact monitor model remain unverified. See the [hardware session notes](docs/VALIDATION.md).
 
 ## Try the app
 
@@ -14,18 +16,21 @@ Version 0.1.1 fixes serial touchscreen reports replacing one held finger with an
 2. Connect video separately (for example, HDMI). Connect the monitor's upstream USB touch cable to the Mac mini through a data-capable USB-C to USB-A adapter. A video picture alone does not establish a touch connection.
 3. Open MacTouch. In **Connection**, choose the detected touch controller and the actual touchscreen display.
 4. Allow **Pointer control** in macOS Accessibility. If touch reports do not arrive, allow **Input Monitoring**, quit/reopen MacTouch, and rescan.
-5. Touch the monitor while **Enable touch** is off. Confirm dots appear in **Live Touch**.
-6. Turn on **Enable touch**. Touch and lift once to arm the pointer, then tap, drag or scroll with two fingers.
+5. Open **Touch tester → Sensor** and confirm numbered dots appear. This also works with only the sensor's USB cable connected, showing its surface on the selected Mac display. If touching only moves the cursor, use **Request multitouch mode** in the tester or Diagnostics, then check for separate contacts without rescanning.
+6. Return to **Connection** and turn on **Enable touch**. Touch and lift once to arm the pointer, then tap, drag or scroll with two fingers. Pointer output pauses while the tester is open.
 7. In **Touch settings**, enable **Launch MacTouch at login**. Closing the window keeps the bridge running in the menu bar. Use the menu-bar icon to pause, reopen or quit.
 
 The local build is ad-hoc signed, not Apple-notarized. Production distribution needs your Developer ID identity and notarization. A clean Mac may block this development build under its normal security policy; use your own signed build for deployment rather than disabling platform protections.
 
 If no controller appears, check the USB upstream cable, adapter, monitor power and monitor touch setting. Confirm the exact model printed on the ASUS label; VT229H is only a candidate. See [ASUS's connection instructions](https://rog.asus.com/us/support/faq/1047313/).
 
-If only one point appears with two fingers down, **Diagnostics → Request multitouch mode** can request the standard advertised HID Device Mode feature on the selected controller. It pauses pointer control, checks the feature's type/range, reads the current mode and verifies it after writing. It does not send guessed vendor commands. Check Live Touch without rescanning; rescanning is unnecessary and can reset some devices. A reported mode of 2 confirms the mode readback, not actual multi-contact operation. This option has not yet been tested on the user's ASUS monitor.
+If only one point appears with two fingers down, **Diagnostics → Request multitouch mode** can request the standard advertised HID Device Mode feature on the selected controller. It pauses pointer control, checks the feature's type/range, reads the current mode and verifies it after writing. It does not send guessed vendor commands. Check the Sensor tester without rescanning; rescanning is unnecessary and can reset some devices. Mode 0 → 2 was verified on the connected CoolTouchR System, followed by a physical five-contact peak. A reported mode of 2 alone confirms mode readback rather than multi-contact operation on another controller.
+
+When updating an ad-hoc signed build, Input Monitoring may appear enabled while the new build still cannot read input. Remove its old entry, add the current **MacTouch.app** from Applications, then choose **Quit & Reopen**. See the [tester guide](docs/TESTING.md).
 
 ## Implemented
 
+- **Touch tester:** a large contact map with numbered, color-coded fingers, coordinates, current/peak counts, and two-/three-finger milestones. Open **Touch tester → Sensor** to measure the selected USB controller without controlling the pointer. Only Input Monitoring is needed for this view; its video cable and Accessibility permission are not required. **Simulation** lets you create 1, 2, 3, 5 or 10 points and drag them with your mouse without permissions. Simulation stays separate from sensor measurements and diagnostics. Reset peak starts new measurements for the selected controller.
 - Native SwiftUI setup window and menu-bar controls; no Dock icon required.
 - macOS 13+ login startup through `SMAppService.mainApp`.
 - Touchscreen-only HID matching; keyboard and ordinary mouse input are not captured.

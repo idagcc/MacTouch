@@ -214,13 +214,20 @@ final class HIDService {
                                 vendorID: vendor, productID: product, transport: string(kIOHIDTransportKey),
                                 descriptor: data, support: "Checking touch format", usable: false)
         do {
-            guard result == kIOReturnSuccess else { throw NSError(domain: "HID", code: Int(result)) }
             let decoder = try HIDDescriptor(data: data)
             decoders[id] = HIDReportDecoder(descriptor: decoder)
             entry.support = decoder.summary
             entry.framing = decoder.framing.rawValue
             entry.touchReportIDs = decoder.reportIDs
             entry.usable = true
+            if result != kIOReturnSuccess {
+                entry.usable = false
+                let denied = result == kIOReturnNotPermitted || result == kIOReturnNotPrivileged
+                entry.support = denied ? "Allow Input Monitoring to read this controller" : "The controller could not be opened"
+                entry.error = denied
+                    ? "macOS denied touch input. Enable MacTouch in Privacy & Security → Input Monitoring, reopen the app and rescan."
+                    : "Could not open touch input (\(String(format: "0x%08X", result))). Rescan to retry."
+            }
         } catch {
             entry.support = "Touch format needs a device profile"
             entry.error = error.localizedDescription
